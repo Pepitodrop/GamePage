@@ -1,0 +1,134 @@
+name: game-page
+
+services:
+  gamepage:
+    build:
+      context: .
+    image: game-page:latest
+    restart: unless-stopped
+    init: true
+    ports:
+      - "127.0.0.1:${GAMEPAGE_PORT:-8090}:8080"
+    environment:
+      LISTEN_ADDRESS: ":8080"
+      SITE_DIRECTORY: /app/site
+      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-https://game.luisbenedikt.de}"
+      HEALTH_TIMEOUT: "${HEALTH_TIMEOUT:-3s}"
+      TRUMP_UPSTREAM: http://trump-vs-shakespeare:8000
+      GOLF_UPSTREAM: http://crazy-mini-golf:8080
+      RACE_UPSTREAM: http://crazy-race:8080
+    depends_on:
+      trump-vs-shakespeare:
+        condition: service_healthy
+      crazy-mini-golf:
+        condition: service_healthy
+      crazy-race:
+        condition: service_healthy
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 128m
+    cpus: 0.50
+    networks:
+      - games
+    logging: &default-logging
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  trump-vs-shakespeare:
+    build:
+      context: "${TRUMP_REPO_PATH:-../TrumpVsShakespeare}"
+    image: trump-vs-shakespeare:gamepage
+    restart: unless-stopped
+    init: true
+    expose:
+      - "8000"
+    environment:
+      HOST: 0.0.0.0
+      PORT: 8000
+      TVS_ALLOWED_ORIGINS: "${PUBLIC_ORIGIN:-https://game.luisbenedikt.de}"
+      TVS_ROOM_TTL_SECONDS: "${TVS_ROOM_TTL_SECONDS:-7200}"
+      TVS_MAX_ROOMS: "${TVS_MAX_ROOMS:-1000}"
+      TVS_MAX_SOCKETS_PER_ROOM: "${TVS_MAX_SOCKETS_PER_ROOM:-6}"
+      TVS_SOCKET_SEND_TIMEOUT_SECONDS: "${TVS_SOCKET_SEND_TIMEOUT_SECONDS:-3}"
+      TVS_WS_IDLE_TIMEOUT_SECONDS: "${TVS_WS_IDLE_TIMEOUT_SECONDS:-60}"
+      TVS_WS_MESSAGES_PER_WINDOW: "${TVS_WS_MESSAGES_PER_WINDOW:-40}"
+      TVS_WS_RATE_WINDOW_SECONDS: "${TVS_WS_RATE_WINDOW_SECONDS:-10}"
+      TVS_ENABLE_DOCS: "false"
+      FORWARDED_ALLOW_IPS: "*"
+      WS_MAX_SIZE: "65536"
+      WS_MAX_QUEUE: "16"
+      KEEP_ALIVE_SECONDS: "5"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 384m
+    cpus: 1.00
+    networks:
+      - games
+    logging: *default-logging
+
+  crazy-mini-golf:
+    build:
+      context: "${GOLF_REPO_PATH:-../CrazyMiniGolf}"
+    image: crazy-mini-golf:gamepage
+    restart: unless-stopped
+    init: true
+    expose:
+      - "8080"
+    read_only: true
+    tmpfs:
+      - /var/cache/nginx:size=16m,mode=0755
+      - /var/run:size=2m,mode=0755
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 128
+    mem_limit: 128m
+    cpus: 0.50
+    networks:
+      - games
+    logging: *default-logging
+
+  crazy-race:
+    build:
+      context: "${RACE_REPO_PATH:-../CrazyRaceGame}"
+    image: crazy-race:gamepage
+    restart: unless-stopped
+    init: true
+    expose:
+      - "8080"
+    environment:
+      BIND_ADDRESS: 0.0.0.0:8080
+      TRACK_SEED: "${TRACK_SEED:-42}"
+      MAX_CONNECTIONS: "${RACE_MAX_CONNECTIONS:-128}"
+      MAX_ROOMS: "${RACE_MAX_ROOMS:-1000}"
+      ROOM_TTL_SECONDS: "${RACE_ROOM_TTL_SECONDS:-7200}"
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 256m
+    cpus: 1.00
+    networks:
+      - games
+    logging: *default-logging
+
+networks:
+  games:
+    driver: bridge
+    internal: true
