@@ -12,11 +12,17 @@ import (
 
 const maxRewriteBodyBytes = 16 << 20
 
+const (
+	gamePageHeadMarkup = `<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="shortcut icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/gamepage-nav.css">`
+	gamePageBackLink  = `<a class="gamepage-back-link" href="/" aria-label="Back to Game Mainframe"><span aria-hidden="true">←</span> Game Mainframe</a>`
+)
+
 func rewriteResponse(response *http.Response, prefix string, upstream *url.URL) error {
 	rewriteLocation(response.Header, prefix, upstream)
 	rewriteCookies(response.Header, prefix)
 
-	if response.Body == nil || !isRewritableContentType(response.Header.Get("Content-Type")) {
+	contentType := response.Header.Get("Content-Type")
+	if response.Body == nil || !isRewritableContentType(contentType) {
 		return nil
 	}
 	if encoding := strings.TrimSpace(response.Header.Get("Content-Encoding")); encoding != "" && !strings.EqualFold(encoding, "identity") {
@@ -34,7 +40,11 @@ func rewriteResponse(response *http.Response, prefix string, upstream *url.URL) 
 		return fmt.Errorf("close upstream response: %w", err)
 	}
 
-	rewritten := []byte(rewriteRootPaths(string(body), prefix))
+	rewrittenText := rewriteRootPaths(string(body), prefix)
+	if isHTMLContentType(contentType) {
+		rewrittenText = injectGamePageChrome(rewrittenText)
+	}
+	rewritten := []byte(rewrittenText)
 	response.Body = io.NopCloser(bytes.NewReader(rewritten))
 	response.ContentLength = int64(len(rewritten))
 	response.Header.Set("Content-Length", strconv.Itoa(len(rewritten)))
@@ -44,7 +54,7 @@ func rewriteResponse(response *http.Response, prefix string, upstream *url.URL) 
 }
 
 func isRewritableContentType(contentType string) bool {
-	contentType = strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+	contentType = normalizedContentType(contentType)
 	if strings.HasPrefix(contentType, "text/") {
 		return true
 	}
@@ -54,6 +64,54 @@ func isRewritableContentType(contentType string) bool {
 	default:
 		return false
 	}
+}
+
+func isHTMLContentType(contentType string) bool {
+	switch normalizedContentType(contentType) {
+	case "text/html", "application/xhtml+xml":
+		return true
+	default:
+		return false
+	}
+}
+
+func normalizedContentType(contentType string) string {
+	return strings.ToLower(strings.TrimSpace(strings.Split(contentType, ";")[0]))
+}
+
+func injectGamePageChrome(input string) string {
+	if !strings.Contains(input, `href="/assets/gamepage-nav.css"`) {
+		input = insertBeforeClosingTag(input, "head", gamePageHeadMarkup)
+	}
+	if !strings.Contains(input, `class="gamepage-back-link"`) {
+		input = insertAfterOpeningTag(input, "body", gamePageBackLink)
+	}
+	return input
+}
+
+func insertBeforeClosingTag(input, tag, markup string) string {
+	lowerInput := strings.ToLower(input)
+	closingTag := "</" + strings.ToLower(tag) + ">"
+	index := strings.Index(lowerInput, closingTag)
+	if index < 0 {
+		return input
+	}
+	return input[:index] + markup + input[index:]
+}
+
+func insertAfterOpeningTag(input, tag, markup string) string {
+	lowerInput := strings.ToLower(input)
+	openingTag := "<" + strings.ToLower(tag)
+	start := strings.Index(lowerInput, openingTag)
+	if start < 0 {
+		return input
+	}
+	endRelative := strings.Index(lowerInput[start:], ">")
+	if endRelative < 0 {
+		return input
+	}
+	end := start + endRelative + 1
+	return input[:end] + markup + input[end:]
 }
 
 func rewriteRootPaths(input, prefix string) string {
