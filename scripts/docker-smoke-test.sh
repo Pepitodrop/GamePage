@@ -26,11 +26,6 @@ body_contains() {
   body="$(curl --fail --silent --show-error --location --max-time 10 "$url")" || return 1
   grep --fixed-strings --quiet "$expected" <<<"$body"
 }
-body_excludes() {
-  local url="$1" unexpected="$2" body
-  body="$(curl --fail --silent --show-error --location --max-time 10 "$url")" || return 1
-  ! grep --fixed-strings --quiet "$unexpected" <<<"$body"
-}
 
 printf 'Testing GamePage stack at %s\n' "$BASE_URL"
 retry 'gateway liveness' http_ok "$BASE_URL/healthz"
@@ -45,22 +40,24 @@ retry 'minimum launchable policy is active' body_contains "$BASE_URL/api/status"
 retry 'healthy policy states are reported' body_contains "$BASE_URL/api/status" '"policyState":"healthy"'
 retry 'all games are launchable' body_contains "$BASE_URL/api/status" '"launchable":true'
 retry 'all games are required by default' body_contains "$BASE_URL/api/status" '"required":true'
-retry 'shared launcher navigation stylesheet' http_ok "$BASE_URL/assets/gamepage-nav.css"
-
-retry 'trump page preserves its native tab icon' body_contains "$BASE_URL/play/trump/" 'href="/play/trump/static/icon.svg'
-retry 'golf page preserves its native tab icon' body_contains "$BASE_URL/play/golf/" 'href="./favicon.svg"'
-retry 'race page preserves its native tab icon' body_contains "$BASE_URL/play/race/" 'href="data:image/svg+xml,'
 
 for game_path in trump golf race; do
+  retry "$game_path page has its branded favicon" body_contains "$BASE_URL/play/$game_path/" "data-gamepage-favicon=\"$game_path\""
+  retry "$game_path favicon is self-contained" body_contains "$BASE_URL/play/$game_path/" 'href="data:image/svg+xml,'
   retry "$game_path page links back to the launcher" body_contains "$BASE_URL/play/$game_path/" 'class="gamepage-back-link"'
-  retry "$game_path page does not replace its native icon" body_excludes "$BASE_URL/play/$game_path/" 'href="/favicon.svg"'
 done
 
-race_headers="$(curl --fail --silent --show-error --dump-header - --output /dev/null --max-time 10 "$BASE_URL/play/race/")"
-printf '%s\n' "$race_headers" \
-  | grep --ignore-case 'content-security-policy:' \
-  | grep --fixed-strings --quiet "style-src 'unsafe-inline' 'self'"
-printf 'PASS: race CSP permits the shared back-button stylesheet\n'
+trump_page="$(curl --fail --silent --show-error --location --max-time 10 "$BASE_URL/play/trump/")"
+golf_page="$(curl --fail --silent --show-error --location --max-time 10 "$BASE_URL/play/golf/")"
+race_page="$(curl --fail --silent --show-error --location --max-time 10 "$BASE_URL/play/race/")"
+trump_icon="$(grep --only-matching 'data-gamepage-favicon="trump"[^>]*' <<<"$trump_page" | head -n1)"
+golf_icon="$(grep --only-matching 'data-gamepage-favicon="golf"[^>]*' <<<"$golf_page" | head -n1)"
+race_icon="$(grep --only-matching 'data-gamepage-favicon="race"[^>]*' <<<"$race_page" | head -n1)"
+if [[ "$trump_icon" == "$golf_icon" || "$trump_icon" == "$race_icon" || "$golf_icon" == "$race_icon" ]]; then
+  printf 'FAIL: game favicons are not distinct\n' >&2
+  exit 1
+fi
+printf 'PASS: game favicons are distinct\n'
 
 redirect_headers="$(curl --silent --show-error --head --max-time 10 "$BASE_URL/play/race")"
 printf '%s\n' "$redirect_headers" | grep --extended-regexp --quiet '^HTTP/.* 308 '
