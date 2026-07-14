@@ -12,12 +12,12 @@ import (
 	"time"
 )
 
-// App owns the launcher routes, health endpoints, and game reverse proxies.
+// App exposes the Go transport layer for the COBOL-owned GamePage application.
 type App struct {
 	handler http.Handler
 }
 
-// New constructs a production HTTP handler from validated configuration.
+// New constructs a production HTTP transport from validated COBOL-owned configuration.
 func New(config Config, logger *slog.Logger) (*App, error) {
 	if logger == nil {
 		logger = slog.Default()
@@ -26,20 +26,28 @@ func New(config Config, logger *slog.Logger) (*App, error) {
 		return nil, fmt.Errorf("site directory %q is not readable", config.SiteDirectory)
 	}
 
-	checker := newStatusChecker(config.Routes, config.HealthTimeout)
+	checker := newStatusChecker(
+		config.Routes,
+		config.HealthTimeout,
+		config.StatusCacheTTL,
+		config.COBOLCoreExecutable,
+		config.MaintenanceMode,
+	)
 	mux := http.NewServeMux()
 
 	mux.HandleFunc("GET /healthz", func(writer http.ResponseWriter, _ *http.Request) {
-		writeStatusJSON(writer, statusResponse{
-			Overall:   "ok",
-			CheckedAt: time.Now().UTC(),
-			Games:     map[string]gameStatus{},
-		}, http.StatusOK)
+		writer.Header().Set("Content-Type", "application/json; charset=utf-8")
+		writer.Header().Set("Cache-Control", "no-store")
+		_ = json.NewEncoder(writer).Encode(map[string]any{
+			"status":          "ok",
+			"transport":       "go",
+			"applicationCore": "cobol",
+		})
 	})
 	mux.HandleFunc("GET /readyz", func(writer http.ResponseWriter, request *http.Request) {
 		status := checker.check(request.Context(), true)
 		code := http.StatusOK
-		if status.Overall != "ok" {
+		if !status.Ready {
 			code = http.StatusServiceUnavailable
 		}
 		writeStatusJSON(writer, status, code)
@@ -58,7 +66,23 @@ func New(config Config, logger *slog.Logger) (*App, error) {
 			}
 			http.Redirect(writer, request, target, http.StatusPermanentRedirect)
 		})
-		mux.Handle(prefix+"/", http.HandlerFunc(route.serveHTTP))
+		mux.Handle(prefix+"/", http.HandlerFunc(func(writer http.ResponseWriter, request *http.Request) {
+			decision := checker.check(request.Context(), false)
+			game, exists := decision.Games[routeConfig.Key]
+			if !exists || !game.Launchable {
+				reason := "decision-unavailable"
+				if exists && game.Reason != "" {
+					reason = game.Reason
+				}
+				writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+				writer.Header().Set("Cache-Control", "no-store")
+				writer.Header().Set("Retry-After", "30")
+				writer.WriteHeader(http.StatusServiceUnavailable)
+				_, _ = fmt.Fprintf(writer, "%s is not launchable (%s).\n", routeConfig.Name, reason)
+				return
+			}
+			route.serveHTTP(writer, request)
+		}))
 	}
 
 	assets := http.FileServer(http.Dir(config.SiteDirectory))
@@ -67,11 +91,9 @@ func New(config Config, logger *slog.Logger) (*App, error) {
 	mux.HandleFunc("GET /robots.txt", exactFile(config.SiteDirectory, "robots.txt", "text/plain; charset=utf-8", "public, max-age=3600"))
 	mux.HandleFunc("GET /.well-known/security.txt", exactFile(config.SiteDirectory, "security.txt", "text/plain; charset=utf-8", "public, max-age=3600"))
 
-	// The game routes intentionally accept multiple HTTP methods. Registering a
-	// method-specific catch-all such as "GET /" alongside those routes causes
-	// Go 1.22+ ServeMux to panic because neither pattern is strictly more
-	// specific. A method-agnostic catch-all avoids that conflict; this handler
-	// then enforces GET/HEAD for launcher and not-found responses itself.
+	// Game routes intentionally accept multiple HTTP methods. A method-agnostic
+	// catch-all avoids the Go 1.22+ ServeMux pattern conflict and enforces
+	// GET/HEAD only for launcher and not-found responses.
 	mux.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodGet && request.Method != http.MethodHead {
 			writer.Header().Set("Allow", "GET, HEAD")
@@ -163,9 +185,12 @@ func MarshalConfigSummary(config Config) string {
 		routes[route.Key] = route.Prefix
 	}
 	payload, _ := json.Marshal(map[string]any{
-		"listen": config.ListenAddress,
-		"origin": config.PublicOrigin,
-		"routes": routes,
+		"listen":          config.ListenAddress,
+		"origin":          config.PublicOrigin,
+		"routes":          routes,
+		"applicationCore": "cobol",
+		"registry":        config.COBOLRegistryPath,
+		"policy":          config.COBOLPolicyPath,
 	})
 	return string(payload)
 }
