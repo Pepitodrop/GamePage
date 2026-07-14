@@ -110,8 +110,38 @@ jobs:
         run: exit 1
 
       - name: Run routed Docker smoke tests
+        id: routed-smoke
+        continue-on-error: true
         working-directory: GamePage
-        run: bash scripts/docker-smoke-test.sh
+        run: bash scripts/docker-smoke-test.sh 2>&1 | tee /tmp/docker-smoke-test.log
+
+      - name: Capture routed smoke diagnostics
+        if: steps.routed-smoke.outcome == 'failure'
+        working-directory: GamePage
+        run: |
+          {
+            echo '=== smoke test output ==='
+            cat /tmp/docker-smoke-test.log || true
+            echo
+            echo '=== docker compose ps --all ==='
+            docker compose ps --all || true
+            echo
+            echo '=== docker compose logs ==='
+            docker compose logs --no-color --tail=500 || true
+          } | tee /tmp/routed-smoke-diagnostics.log
+
+      - name: Upload routed smoke diagnostics
+        if: steps.routed-smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: routed-smoke-diagnostics
+          path: /tmp/routed-smoke-diagnostics.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail on routed smoke-test error
+        if: steps.routed-smoke.outcome == 'failure'
+        run: exit 1
 
       - name: Show container status and logs
         if: failure()
