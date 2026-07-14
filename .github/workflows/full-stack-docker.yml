@@ -53,27 +53,27 @@ jobs:
 
     steps:
       - name: Check out GamePage
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           path: GamePage
           show-progress: false
 
       - name: Check out Trump vs. Shakespeare
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: Pepitodrop/TrumpVsShakespeare
           path: TrumpVsShakespeare
           show-progress: false
 
       - name: Check out Crazy Mini Golf
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: Pepitodrop/CrazyMiniGolf
           path: CrazyMiniGolf
           show-progress: false
 
       - name: Check out Crazy Race
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
         with:
           repository: Pepitodrop/CrazyRaceGame
           path: CrazyRaceGame
