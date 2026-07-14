@@ -29,7 +29,10 @@ http_ok() {
 body_contains() {
   local url="$1"
   local expected="$2"
-  curl --fail --silent --show-error --location --max-time 10 "$url" | grep --fixed-strings --quiet "$expected"
+  local body
+
+  body="$(curl --fail --silent --show-error --location --max-time 10 "$url")" || return 1
+  grep --fixed-strings --quiet "$expected" <<<"$body"
 }
 
 printf 'Testing GamePage stack at %s\n' "$BASE_URL"
