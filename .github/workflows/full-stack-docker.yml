@@ -109,7 +109,7 @@ jobs:
 
       - name: Upload startup diagnostics
         if: steps.start-stack.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: full-stack-diagnostics
           path: /tmp/full-stack-diagnostics.log
@@ -143,7 +143,7 @@ jobs:
 
       - name: Upload routed smoke diagnostics
         if: steps.routed-smoke.outcome == 'failure'
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: routed-smoke-diagnostics
           path: /tmp/routed-smoke-diagnostics.log
