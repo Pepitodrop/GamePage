@@ -16,11 +16,15 @@ services:
       SITE_DIRECTORY: /app/site
       PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-https://game.luisbenedikt.de}"
       HEALTH_TIMEOUT: "${HEALTH_TIMEOUT:-3s}"
+      COBOL_CORE_EXECUTABLE: /app/gamepage-core
+      COBOL_REGISTRY_PATH: /app/site/runtime/routes.tsv
+      COBOL_POLICY_PATH: /app/site/runtime/policy.tsv
+      MAINTENANCE_MODE: "${MAINTENANCE_MODE:-false}"
       TRUMP_UPSTREAM: http://trump-vs-shakespeare:8000
       GOLF_UPSTREAM: http://crazy-mini-golf:8080
       RACE_UPSTREAM: http://crazy-race:8080
-    # Keep the launcher available during a partial game outage. /readyz and
-    # /api/status still report any unhealthy upstream service.
+    # Keep the launcher available during a partial outage or maintenance mode.
+    # COBOL owns /readyz and /api/status decisions.
     depends_on:
       trump-vs-shakespeare:
         condition: service_started
@@ -29,6 +33,8 @@ services:
       crazy-race:
         condition: service_started
     read_only: true
+    tmpfs:
+      - /tmp:size=8m,mode=1777,noexec,nosuid,nodev
     cap_drop:
       - ALL
     security_opt:

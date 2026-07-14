@@ -11,7 +11,7 @@ permissions:
 jobs:
   validate:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,39 +23,91 @@ jobs:
           go-version-file: go.mod
           cache: true
 
-      - name: Test and vet gateway
+      - name: Test and vet Go transport
         run: |
           go test -race ./...
           go vet ./...
 
-      - name: Compile COBOL and generate launcher assets
+      - name: Compile and test COBOL application core
         run: |
           sudo apt-get update
           sudo apt-get install -y gnucobol
           set +e
-          cobc -x -free -Wall -o /tmp/gamepage-builder src/gamepage.cob > /tmp/cobol-build.log 2>&1
+          {
+            cobc -x -free -Wall -o /tmp/gamepage-builder src/gamepage.cob
+            cobc -x -free -Wall -o /tmp/gamepage-registry-builder src/gamepage_registry.cob
+            cobc -x -free -Wall -o /tmp/gamepage-core src/gamepage_core.cob
+          } > /tmp/cobol-build.log 2>&1
           cobol_status=$?
           set -e
           cat /tmp/cobol-build.log
           if [ "$cobol_status" -ne 0 ]; then
             exit "$cobol_status"
           fi
-          mkdir -p /tmp/gamepage-site/assets
-          (cd /tmp/gamepage-site && /tmp/gamepage-builder)
+
+          mkdir -p /tmp/gamepage-site/assets /tmp/gamepage-site/runtime
+          (cd /tmp/gamepage-site && /tmp/gamepage-builder && /tmp/gamepage-registry-builder)
           test -s /tmp/gamepage-site/index.html
           test -s /tmp/gamepage-site/assets/styles.css
           test -s /tmp/gamepage-site/assets/status.js
+          test -s /tmp/gamepage-site/runtime/routes.tsv
+          test -s /tmp/gamepage-site/runtime/policy.tsv
+          test -s /tmp/gamepage-site/runtime/architecture.json
           grep -q "COBOL Game Mainframe" /tmp/gamepage-site/index.html
-          grep -q "/play/trump/" /tmp/gamepage-site/index.html
-          grep -q "/play/golf/" /tmp/gamepage-site/index.html
-          grep -q "/play/race/" /tmp/gamepage-site/index.html
+          grep -q 'decision-engine-unavailable' /tmp/gamepage-site/assets/status.js
+          grep -q '"applicationOwner": "COBOL"' /tmp/gamepage-site/runtime/architecture.json
+
+          cat > /tmp/status-healthy.in <<'STATUS'
+          META|2026-07-14T10:00:00Z|false
+          GAME|trump|Trump vs. Shakespeare|/play/trump/|up|200|12|
+          GAME|golf|Crazy Mini Golf|/play/golf/|up|200|8|
+          GAME|race|Crazy Race|/play/race/|up|200|15|
+          STATUS
+          /tmp/gamepage-core /tmp/status-healthy.in /tmp/status-healthy.json
+
+          cat > /tmp/status-degraded.in <<'STATUS'
+          META|2026-07-14T10:00:00Z|false
+          GAME|trump|Trump vs. Shakespeare|/play/trump/|up|200|12|
+          GAME|golf|Crazy Mini Golf|/play/golf/|down|503|8|http-error
+          GAME|race|Crazy Race|/play/race/|up|200|15|
+          STATUS
+          /tmp/gamepage-core /tmp/status-degraded.in /tmp/status-degraded.json
+
+          cat > /tmp/status-maintenance.in <<'STATUS'
+          META|2026-07-14T10:00:00Z|true
+          GAME|trump|Trump vs. Shakespeare|/play/trump/|up|200|12|
+          GAME|golf|Crazy Mini Golf|/play/golf/|up|200|8|
+          GAME|race|Crazy Race|/play/race/|up|200|15|
+          STATUS
+          /tmp/gamepage-core /tmp/status-maintenance.in /tmp/status-maintenance.json
+
+          python3 - <<'PY'
+          import json
+          healthy = json.load(open('/tmp/status-healthy.json'))
+          assert healthy['overall'] == 'ok'
+          assert healthy['ready'] is True
+          assert healthy['decisionEngine'] == 'gnucobol'
+          assert all(game['launchable'] for game in healthy['games'].values())
+
+          degraded = json.load(open('/tmp/status-degraded.json'))
+          assert degraded['overall'] == 'degraded'
+          assert degraded['ready'] is False
+          assert degraded['games']['golf']['launchable'] is False
+
+          maintenance = json.load(open('/tmp/status-maintenance.json'))
+          assert maintenance['overall'] == 'maintenance'
+          assert maintenance['ready'] is False
+          assert all(not game['launchable'] for game in maintenance['games'].values())
+          PY
 
       - name: Upload COBOL diagnostics
         if: failure()
         uses: actions/upload-artifact@v4
         with:
           name: cobol-diagnostics
-          path: /tmp/cobol-build.log
+          path: |
+            /tmp/cobol-build.log
+            /tmp/status-*.json
           if-no-files-found: ignore
           retention-days: 7
 
