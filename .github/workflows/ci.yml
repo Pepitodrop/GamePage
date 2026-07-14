@@ -28,15 +28,15 @@ jobs:
           go test -race ./...
           go vet ./...
 
-      - name: Compile and test COBOL application core
+      - name: Compile and test COBOL registry and policy engine
         run: |
           sudo apt-get update
           sudo apt-get install -y gnucobol
           set +e
           {
-            cobc -x -free -Wall -o /tmp/gamepage-builder src/gamepage.cob
-            cobc -x -free -Wall -o /tmp/gamepage-registry-builder src/gamepage_registry.cob
-            cobc -x -free -Wall -o /tmp/gamepage-core src/gamepage_core.cob
+            cobc -x -free -Wall -I src -o /tmp/gamepage-builder src/gamepage.cob
+            cobc -x -free -Wall -I src -o /tmp/gamepage-registry-builder src/gamepage_registry.cob
+            cobc -x -free -Wall -I src -o /tmp/gamepage-core src/gamepage_core.cob
           } > /tmp/cobol-build.log 2>&1
           cobol_status=$?
           set -e
@@ -54,50 +54,118 @@ jobs:
           test -s /tmp/gamepage-site/runtime/policy.tsv
           test -s /tmp/gamepage-site/runtime/architecture.json
           grep -q "COBOL Game Mainframe" /tmp/gamepage-site/index.html
-          grep -q 'decision-engine-unavailable' /tmp/gamepage-site/assets/status.js
-          grep -q '"applicationOwner": "COBOL"' /tmp/gamepage-site/runtime/architecture.json
+          test "$(grep -c 'data-status="trump"' /tmp/gamepage-site/index.html)" -eq 1
+          test "$(grep -c 'data-status="golf"' /tmp/gamepage-site/index.html)" -eq 1
+          test "$(grep -c 'data-status="race"' /tmp/gamepage-site/index.html)" -eq 1
+          grep -q 'TRUMP_ENABLED' /tmp/gamepage-site/runtime/routes.tsv
+          grep -q 'MINIMUM_LAUNCHABLE_GAMES|1' /tmp/gamepage-site/runtime/policy.tsv
+          grep -q 'canonicalRegistry' /tmp/gamepage-site/runtime/architecture.json
+          grep -q 'policyState' /tmp/gamepage-site/assets/status.js
 
           cat > /tmp/status-healthy.in <<'STATUS'
-          META|2026-07-14T10:00:00Z|false
-          GAME|trump|Trump vs. Shakespeare|/play/trump/|up|200|12|
-          GAME|golf|Crazy Mini Golf|/play/golf/|up|200|8|
-          GAME|race|Crazy Race|/play/race/|up|200|15|
+          META|2026-07-14T10:00:00Z|false|
+          GAME|trump|up|200|12||||
+          GAME|golf|up|200|8||||
+          GAME|race|up|200|15||||
           STATUS
           /tmp/gamepage-core /tmp/status-healthy.in /tmp/status-healthy.json
 
-          cat > /tmp/status-degraded.in <<'STATUS'
-          META|2026-07-14T10:00:00Z|false
-          GAME|trump|Trump vs. Shakespeare|/play/trump/|up|200|12|
-          GAME|golf|Crazy Mini Golf|/play/golf/|down|503|8|http-error
-          GAME|race|Crazy Race|/play/race/|up|200|15|
+          cat > /tmp/status-optional-down.in <<'STATUS'
+          META|2026-07-14T10:00:00Z|false|
+          GAME|trump|up|200|12||||
+          GAME|golf|down|503|8|http-error|true|false|
+          GAME|race|up|200|15||||
           STATUS
-          /tmp/gamepage-core /tmp/status-degraded.in /tmp/status-degraded.json
+          /tmp/gamepage-core /tmp/status-optional-down.in /tmp/status-optional-down.json
+
+          cat > /tmp/status-required-down.in <<'STATUS'
+          META|2026-07-14T10:00:00Z|false|
+          GAME|trump|up|200|12||||
+          GAME|golf|down|503|8|http-error|||
+          GAME|race|up|200|15||||
+          STATUS
+          /tmp/gamepage-core /tmp/status-required-down.in /tmp/status-required-down.json
+
+          cat > /tmp/status-slow.in <<'STATUS'
+          META|2026-07-14T10:00:00Z|false|
+          GAME|trump|up|200|12||||
+          GAME|golf|up|200|8||||
+          GAME|race|up|200|3000||||
+          STATUS
+          /tmp/gamepage-core /tmp/status-slow.in /tmp/status-slow.json
+
+          cat > /tmp/status-disabled.in <<'STATUS'
+          META|2026-07-14T10:00:00Z|false|
+          GAME|trump|up|200|12||||
+          GAME|golf|up|200|8||false|false|
+          GAME|race|up|200|15||||
+          STATUS
+          /tmp/gamepage-core /tmp/status-disabled.in /tmp/status-disabled.json
 
           cat > /tmp/status-maintenance.in <<'STATUS'
-          META|2026-07-14T10:00:00Z|true
-          GAME|trump|Trump vs. Shakespeare|/play/trump/|up|200|12|
-          GAME|golf|Crazy Mini Golf|/play/golf/|up|200|8|
-          GAME|race|Crazy Race|/play/race/|up|200|15|
+          META|2026-07-14T10:00:00Z|true|
+          GAME|trump|up|200|12||||
+          GAME|golf|up|200|8||||
+          GAME|race|up|200|15||||
           STATUS
           /tmp/gamepage-core /tmp/status-maintenance.in /tmp/status-maintenance.json
 
+          cat > /tmp/status-invalid.in <<'STATUS'
+          META|2026-07-14T10:00:00Z|false|
+          GAME|trump|up|200|12||maybe||
+          GAME|golf|up|200|8||||
+          GAME|race|up|200|15||||
+          STATUS
+          /tmp/gamepage-core /tmp/status-invalid.in /tmp/status-invalid.json
+
           python3 - <<'PY'
           import json
-          healthy = json.load(open('/tmp/status-healthy.json'))
+
+          def load(name):
+              with open(f'/tmp/status-{name}.json', encoding='utf-8') as handle:
+                  return json.load(handle)
+
+          healthy = load('healthy')
           assert healthy['overall'] == 'ok'
           assert healthy['ready'] is True
           assert healthy['decisionEngine'] == 'gnucobol'
+          assert healthy['summary']['healthy'] == 3
           assert all(game['launchable'] for game in healthy['games'].values())
+          assert all(game['required'] for game in healthy['games'].values())
 
-          degraded = json.load(open('/tmp/status-degraded.json'))
-          assert degraded['overall'] == 'degraded'
-          assert degraded['ready'] is False
-          assert degraded['games']['golf']['launchable'] is False
+          optional = load('optional-down')
+          assert optional['overall'] == 'degraded'
+          assert optional['ready'] is True
+          assert optional['games']['golf']['policyState'] == 'down'
+          assert optional['games']['golf']['required'] is False
+          assert optional['games']['golf']['launchable'] is False
 
-          maintenance = json.load(open('/tmp/status-maintenance.json'))
+          required = load('required-down')
+          assert required['overall'] == 'degraded'
+          assert required['ready'] is False
+          assert required['policy']['requiredFailures'] == 1
+
+          slow = load('slow')
+          assert slow['overall'] == 'degraded'
+          assert slow['ready'] is False
+          assert slow['games']['race']['policyState'] == 'slow'
+          assert slow['games']['race']['launchable'] is True
+          assert slow['games']['race']['reason'] == 'latency-threshold-exceeded'
+
+          disabled = load('disabled')
+          assert disabled['overall'] == 'degraded'
+          assert disabled['ready'] is True
+          assert disabled['games']['golf']['policyState'] == 'disabled'
+          assert disabled['games']['golf']['launchable'] is False
+
+          maintenance = load('maintenance')
           assert maintenance['overall'] == 'maintenance'
           assert maintenance['ready'] is False
           assert all(not game['launchable'] for game in maintenance['games'].values())
+
+          invalid = load('invalid')
+          assert invalid['overall'] == 'configuration-error'
+          assert invalid['ready'] is False
           PY
 
       - name: Upload COBOL diagnostics

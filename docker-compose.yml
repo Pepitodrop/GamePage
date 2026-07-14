@@ -20,11 +20,21 @@ services:
       COBOL_REGISTRY_PATH: /app/site/runtime/routes.tsv
       COBOL_POLICY_PATH: /app/site/runtime/policy.tsv
       MAINTENANCE_MODE: "${MAINTENANCE_MODE:-false}"
+      MINIMUM_LAUNCHABLE_GAMES: "${MINIMUM_LAUNCHABLE_GAMES:-1}"
+      TRUMP_ENABLED: "${TRUMP_ENABLED:-true}"
+      TRUMP_REQUIRED: "${TRUMP_REQUIRED:-true}"
+      TRUMP_MAX_LATENCY_MS: "${TRUMP_MAX_LATENCY_MS:-2500}"
+      GOLF_ENABLED: "${GOLF_ENABLED:-true}"
+      GOLF_REQUIRED: "${GOLF_REQUIRED:-true}"
+      GOLF_MAX_LATENCY_MS: "${GOLF_MAX_LATENCY_MS:-2500}"
+      RACE_ENABLED: "${RACE_ENABLED:-true}"
+      RACE_REQUIRED: "${RACE_REQUIRED:-true}"
+      RACE_MAX_LATENCY_MS: "${RACE_MAX_LATENCY_MS:-2500}"
       TRUMP_UPSTREAM: http://trump-vs-shakespeare:8000
       GOLF_UPSTREAM: http://crazy-mini-golf:8080
       RACE_UPSTREAM: http://crazy-race:8080
-    # Keep the launcher available during a partial outage or maintenance mode.
-    # COBOL owns /readyz and /api/status decisions.
+    # Keep the launcher available during partial outages or maintenance mode.
+    # COBOL owns readiness, optional degradation, and route launchability.
     depends_on:
       trump-vs-shakespeare:
         condition: service_started

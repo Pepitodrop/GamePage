@@ -37,14 +37,20 @@ func TestNewRegistersLauncherAndMethodAgnosticGameRoutes(t *testing.T) {
 set -eu
 checked_at="$(head -n 1 "$1" | cut -d'|' -f2)"
 cat > "$2" <<JSON
-{"overall":"ok","ready":true,"mode":"normal","decisionEngine":"gnucobol","checkedAt":"${checked_at}","summary":{"total":1,"up":1,"down":0},"games":{"test":{"name":"Test Game","path":"/play/test/","status":"up","httpStatus":200,"latencyMs":1,"error":"","launchable":true,"reason":"ready"}}}
+{"overall":"ok","ready":true,"mode":"normal","decisionEngine":"gnucobol","checkedAt":"${checked_at}","policy":{"minimumLaunchableGames":1,"requiredFailures":0},"summary":{"total":1,"up":1,"down":0,"enabled":1,"required":1,"launchable":1,"healthy":1,"slow":0,"disabled":0},"games":{"test":{"name":"Test Game","path":"/play/test/","status":"up","policyState":"healthy","httpStatus":200,"latencyMs":1,"error":"","enabled":true,"required":true,"maxLatencyMs":2500,"launchable":true,"reason":"ready"}}}
 JSON
 `
 	if err := os.WriteFile(enginePath, []byte(engine), 0o700); err != nil {
 		t.Fatalf("write fake COBOL core: %v", err)
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	app, err := New(Config{SiteDirectory: siteDirectory, PublicOrigin: "https://example.test", HealthTimeout: time.Second, StatusCacheTTL: 5 * time.Second, COBOLCoreExecutable: enginePath, MaintenanceMode: "false", Routes: []RouteConfig{{Key: "test", Name: "Test Game", Prefix: "/play/test", Upstream: upstreamURL, HealthPath: "/healthz"}}}, logger)
+	app, err := New(Config{
+		SiteDirectory: siteDirectory, PublicOrigin: "https://example.test",
+		HealthTimeout: time.Second, StatusCacheTTL: 5 * time.Second,
+		COBOLCoreExecutable: enginePath, MaintenanceMode: "false",
+		MinimumLaunchableGames: "1",
+		Routes: []RouteConfig{{Key: "test", Name: "Test Game", Prefix: "/play/test", Upstream: upstreamURL, HealthPath: "/healthz"}},
+	}, logger)
 	if err != nil {
 		t.Fatalf("construct app: %v", err)
 	}

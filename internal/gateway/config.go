@@ -12,37 +12,46 @@ import (
 
 // Config contains runtime settings for the COBOL-owned application and the Go transport gateway.
 type Config struct {
-	ListenAddress       string
-	SiteDirectory       string
-	PublicOrigin        string
-	HealthTimeout       time.Duration
-	StatusCacheTTL      time.Duration
-	COBOLCoreExecutable string
-	COBOLRegistryPath   string
-	COBOLPolicyPath     string
-	MaintenanceMode     string
-	Routes              []RouteConfig
+	ListenAddress          string
+	SiteDirectory          string
+	PublicOrigin           string
+	HealthTimeout          time.Duration
+	StatusCacheTTL         time.Duration
+	COBOLCoreExecutable    string
+	COBOLRegistryPath      string
+	COBOLPolicyPath        string
+	MaintenanceMode        string
+	MinimumLaunchableGames string
+	Routes                 []RouteConfig
 }
 
 // RouteConfig describes one game mounted below the public launcher domain.
 type RouteConfig struct {
-	Key        string
-	Name       string
-	Prefix     string
-	Upstream   *url.URL
-	HealthPath string
+	Key                string
+	Name               string
+	Prefix             string
+	Upstream           *url.URL
+	HealthPath         string
+	EnabledOverride    string
+	RequiredOverride   string
+	MaxLatencyOverride string
 }
 
 type registryRoute struct {
-	key, name, prefix, envName, fallback, healthPath string
+	key, name, prefix, upstreamEnv, fallback, healthPath string
+	enabledEnv, requiredEnv, latencyEnv                  string
+	defaultEnabled, defaultRequired                     string
+	defaultMaxLatency                                   int
 }
 
 type runtimePolicy struct {
-	StatusCacheTTL time.Duration
-	MaxGames       int
+	StatusCacheTTL        time.Duration
+	MaxGames              int
+	MinimumLaunchableGames int
 }
 
 // LoadConfig loads COBOL-generated application policy and validates transport settings.
+// Raw policy overrides are deliberately not interpreted here; COBOL resolves them.
 func LoadConfig() (Config, error) {
 	policyPath := envOrDefault("COBOL_POLICY_PATH", "/app/site/runtime/policy.tsv")
 	policy, err := loadRuntimePolicy(policyPath)
@@ -72,30 +81,34 @@ func LoadConfig() (Config, error) {
 
 	routes := make([]RouteConfig, 0, len(registry))
 	for _, input := range registry {
-		upstream, err := parseHTTPURL(envOrDefault(input.envName, input.fallback))
+		upstream, err := parseHTTPURL(envOrDefault(input.upstreamEnv, input.fallback))
 		if err != nil {
-			return Config{}, fmt.Errorf("%s: %w", input.envName, err)
+			return Config{}, fmt.Errorf("%s: %w", input.upstreamEnv, err)
 		}
 		routes = append(routes, RouteConfig{
-			Key:        input.key,
-			Name:       input.name,
-			Prefix:     input.prefix,
-			Upstream:   upstream,
-			HealthPath: input.healthPath,
+			Key:                input.key,
+			Name:               input.name,
+			Prefix:             input.prefix,
+			Upstream:           upstream,
+			HealthPath:         input.healthPath,
+			EnabledOverride:    envRaw(input.enabledEnv),
+			RequiredOverride:   envRaw(input.requiredEnv),
+			MaxLatencyOverride: envRaw(input.latencyEnv),
 		})
 	}
 
 	return Config{
-		ListenAddress:       envOrDefault("LISTEN_ADDRESS", ":8080"),
-		SiteDirectory:       envOrDefault("SITE_DIRECTORY", "/app/site"),
-		PublicOrigin:        origin,
-		HealthTimeout:       timeout,
-		StatusCacheTTL:      cacheTTL,
-		COBOLCoreExecutable: envOrDefault("COBOL_CORE_EXECUTABLE", "/app/gamepage-core"),
-		COBOLRegistryPath:   registryPath,
-		COBOLPolicyPath:     policyPath,
-		MaintenanceMode:     envOrDefault("MAINTENANCE_MODE", "false"),
-		Routes:              routes,
+		ListenAddress:          envOrDefault("LISTEN_ADDRESS", ":8080"),
+		SiteDirectory:          envOrDefault("SITE_DIRECTORY", "/app/site"),
+		PublicOrigin:           origin,
+		HealthTimeout:          timeout,
+		StatusCacheTTL:         cacheTTL,
+		COBOLCoreExecutable:    envOrDefault("COBOL_CORE_EXECUTABLE", "/app/gamepage-core"),
+		COBOLRegistryPath:      registryPath,
+		COBOLPolicyPath:        policyPath,
+		MaintenanceMode:        envRaw("MAINTENANCE_MODE"),
+		MinimumLaunchableGames: envRaw("MINIMUM_LAUNCHABLE_GAMES"),
+		Routes:                 routes,
 	}, nil
 }
 
@@ -138,7 +151,21 @@ func loadRuntimePolicy(path string) (runtimePolicy, error) {
 	if err != nil || maxGames < 1 || maxGames > 10 {
 		return runtimePolicy{}, fmt.Errorf("MAX_GAMES must be between 1 and 10")
 	}
-	return runtimePolicy{StatusCacheTTL: cacheTTL, MaxGames: maxGames}, nil
+	minimum, err := strconv.Atoi(values["MINIMUM_LAUNCHABLE_GAMES"])
+	if err != nil || minimum < 1 || minimum > maxGames {
+		return runtimePolicy{}, fmt.Errorf("MINIMUM_LAUNCHABLE_GAMES must be between 1 and MAX_GAMES")
+	}
+	if values["OPTIONAL_FAILURES_ALLOW_READY"] != "true" {
+		return runtimePolicy{}, fmt.Errorf("OPTIONAL_FAILURES_ALLOW_READY must be true")
+	}
+	if values["SLOW_GAMES_REMAIN_LAUNCHABLE"] != "true" {
+		return runtimePolicy{}, fmt.Errorf("SLOW_GAMES_REMAIN_LAUNCHABLE must be true")
+	}
+	return runtimePolicy{
+		StatusCacheTTL:        cacheTTL,
+		MaxGames:              maxGames,
+		MinimumLaunchableGames: minimum,
+	}, nil
 }
 
 func loadRouteRegistry(path string, maxGames int) ([]registryRoute, error) {
@@ -158,7 +185,7 @@ func loadRouteRegistry(path string, maxGames int) ([]registryRoute, error) {
 			continue
 		}
 		parts := strings.Split(line, "|")
-		if len(parts) != 6 {
+		if len(parts) != 12 {
 			return nil, fmt.Errorf("invalid route record %q", line)
 		}
 		for index := range parts {
@@ -167,15 +194,32 @@ func loadRouteRegistry(path string, maxGames int) ([]registryRoute, error) {
 				return nil, fmt.Errorf("route field contains a forbidden JSON or record character")
 			}
 		}
-		route := registryRoute{parts[0], parts[1], parts[2], parts[3], parts[4], parts[5]}
+		defaultMaxLatency, err := strconv.Atoi(parts[11])
+		if err != nil || defaultMaxLatency < 1 || defaultMaxLatency > 999999 {
+			return nil, fmt.Errorf("invalid default latency for route %q", parts[0])
+		}
+		route := registryRoute{
+			key: parts[0], name: parts[1], prefix: parts[2], upstreamEnv: parts[3],
+			fallback: parts[4], healthPath: parts[5], enabledEnv: parts[6],
+			requiredEnv: parts[7], latencyEnv: parts[8], defaultEnabled: parts[9],
+			defaultRequired: parts[10], defaultMaxLatency: defaultMaxLatency,
+		}
 		if !isIdentifier(route.key) {
 			return nil, fmt.Errorf("invalid route key %q", route.key)
 		}
 		if route.name == "" || !strings.HasPrefix(route.prefix, "/play/") || strings.HasSuffix(route.prefix, "/") {
 			return nil, fmt.Errorf("invalid name or prefix for route %q", route.key)
 		}
-		if !isEnvironmentName(route.envName) || !strings.HasPrefix(route.healthPath, "/") {
+		if !isEnvironmentName(route.upstreamEnv) || !isEnvironmentName(route.enabledEnv) ||
+			!isEnvironmentName(route.requiredEnv) || !isEnvironmentName(route.latencyEnv) ||
+			!strings.HasPrefix(route.healthPath, "/") {
 			return nil, fmt.Errorf("invalid environment name or health path for route %q", route.key)
+		}
+		if route.defaultEnabled != "Y" && route.defaultEnabled != "N" {
+			return nil, fmt.Errorf("invalid enabled default for route %q", route.key)
+		}
+		if route.defaultRequired != "Y" && route.defaultRequired != "N" {
+			return nil, fmt.Errorf("invalid required default for route %q", route.key)
 		}
 		if _, err := parseHTTPURL(route.fallback); err != nil {
 			return nil, fmt.Errorf("route %q fallback: %w", route.key, err)
@@ -253,4 +297,8 @@ func envOrDefault(name, fallback string) string {
 		return value
 	}
 	return fallback
+}
+
+func envRaw(name string) string {
+	return strings.TrimSpace(os.Getenv(name))
 }

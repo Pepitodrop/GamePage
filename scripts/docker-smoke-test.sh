@@ -30,13 +30,16 @@ body_contains() {
 printf 'Testing GamePage stack at %s\n' "$BASE_URL"
 retry 'gateway liveness' http_ok "$BASE_URL/healthz"
 retry 'complete stack readiness' http_ok "$BASE_URL/readyz"
-retry 'COBOL-generated launcher' body_contains "$BASE_URL/" 'COBOL Game Mainframe'
+retry 'registry-generated launcher' body_contains "$BASE_URL/" 'GAME_REGISTRY.CPY'
 retry 'Trump vs. Shakespeare route' http_ok "$BASE_URL/play/trump/"
 retry 'Crazy Mini Golf route' http_ok "$BASE_URL/play/golf/"
 retry 'Crazy Race route' http_ok "$BASE_URL/play/race/"
 retry 'aggregated status is healthy' body_contains "$BASE_URL/api/status" '"overall":"ok"'
 retry 'COBOL owns application decisions' body_contains "$BASE_URL/api/status" '"decisionEngine":"gnucobol"'
+retry 'minimum launchable policy is active' body_contains "$BASE_URL/api/status" '"minimumLaunchableGames":1'
+retry 'healthy policy states are reported' body_contains "$BASE_URL/api/status" '"policyState":"healthy"'
 retry 'all games are launchable' body_contains "$BASE_URL/api/status" '"launchable":true'
+retry 'all games are required by default' body_contains "$BASE_URL/api/status" '"required":true'
 
 redirect_headers="$(curl --silent --show-error --head --max-time 10 "$BASE_URL/play/race")"
 printf '%s\n' "$redirect_headers" | grep --extended-regexp --quiet '^HTTP/.* 308 '
