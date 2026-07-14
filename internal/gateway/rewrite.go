@@ -13,13 +13,14 @@ import (
 const maxRewriteBodyBytes = 16 << 20
 
 const (
-	gamePageHeadMarkup = `<link rel="icon" href="/favicon.svg" type="image/svg+xml"><link rel="shortcut icon" href="/favicon.svg"><link rel="stylesheet" href="/assets/gamepage-nav.css">`
-	gamePageBackLink  = `<a class="gamepage-back-link" href="/" aria-label="Back to Game Mainframe"><span aria-hidden="true">←</span> Game Mainframe</a>`
+	gamePageStylesheet = `<link rel="stylesheet" href="/assets/gamepage-nav.css">`
+	gamePageBackLink   = `<a class="gamepage-back-link" href="/" aria-label="Back to Game Mainframe"><span aria-hidden="true">←</span> Game Mainframe</a>`
 )
 
 func rewriteResponse(response *http.Response, prefix string, upstream *url.URL) error {
 	rewriteLocation(response.Header, prefix, upstream)
 	rewriteCookies(response.Header, prefix)
+	rewriteContentSecurityPolicy(response.Header)
 
 	contentType := response.Header.Get("Content-Type")
 	if response.Body == nil || !isRewritableContentType(contentType) {
@@ -81,7 +82,7 @@ func normalizedContentType(contentType string) string {
 
 func injectGamePageChrome(input string) string {
 	if !strings.Contains(input, `href="/assets/gamepage-nav.css"`) {
-		input = insertBeforeClosingTag(input, "head", gamePageHeadMarkup)
+		input = insertBeforeClosingTag(input, "head", gamePageStylesheet)
 	}
 	if !strings.Contains(input, `class="gamepage-back-link"`) {
 		input = insertAfterOpeningTag(input, "body", gamePageBackLink)
@@ -112,6 +113,50 @@ func insertAfterOpeningTag(input, tag, markup string) string {
 	}
 	end := start + endRelative + 1
 	return input[:end] + markup + input[end:]
+}
+
+func rewriteContentSecurityPolicy(header http.Header) {
+	policies := header.Values("Content-Security-Policy")
+	if len(policies) == 0 {
+		return
+	}
+
+	header.Del("Content-Security-Policy")
+	for _, policy := range policies {
+		header.Add("Content-Security-Policy", ensureStyleSourceSelf(policy))
+	}
+}
+
+func ensureStyleSourceSelf(policy string) string {
+	directives := strings.Split(policy, ";")
+	foundStyleSource := false
+
+	for index, directive := range directives {
+		fields := strings.Fields(directive)
+		if len(fields) == 0 || !strings.EqualFold(fields[0], "style-src") {
+			continue
+		}
+		foundStyleSource = true
+		for _, source := range fields[1:] {
+			if source == "'self'" {
+				return policy
+			}
+		}
+		directives[index] = strings.TrimSpace(directive) + " 'self'"
+	}
+
+	if foundStyleSource {
+		return strings.Join(directives, ";")
+	}
+
+	trimmed := strings.TrimSpace(policy)
+	if trimmed == "" {
+		return "style-src 'self'"
+	}
+	if !strings.HasSuffix(trimmed, ";") {
+		trimmed += ";"
+	}
+	return trimmed + " style-src 'self'"
 }
 
 func rewriteRootPaths(input, prefix string) string {

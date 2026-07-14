@@ -28,12 +28,13 @@ func TestRewriteResponse(t *testing.T) {
 	upstream, _ := url.Parse("http://crazy-race:8080")
 	response := &http.Response{
 		Header: http.Header{
-			"Content-Type": {"text/html; charset=utf-8"},
-			"Location":     {"/room/ABC"},
-			"Set-Cookie":   {"session=abc; Path=/; HttpOnly; SameSite=Lax"},
-			"ETag":         {`"old"`},
+			"Content-Type":            {"text/html; charset=utf-8"},
+			"Content-Security-Policy": {"default-src 'none'; img-src 'self' data:; style-src 'unsafe-inline'; form-action 'self'"},
+			"Location":                {"/room/ABC"},
+			"Set-Cookie":              {"session=abc; Path=/; HttpOnly; SameSite=Lax"},
+			"ETag":                    {`"old"`},
 		},
-		Body: io.NopCloser(strings.NewReader(`<!doctype html><html><head><title>Race</title></head><body><form action="/action"></form></body></html>`)),
+		Body: io.NopCloser(strings.NewReader(`<!doctype html><html><head><link rel="icon" href="data:image/svg+xml,%3Csvg%3E"><title>Race</title></head><body><form action="/action"></form></body></html>`)),
 	}
 
 	if err := rewriteResponse(response, "/play/race", upstream); err != nil {
@@ -43,7 +44,7 @@ func TestRewriteResponse(t *testing.T) {
 	bodyText := string(body)
 	for _, expected := range []string{
 		`action="/play/race/action"`,
-		`href="/favicon.svg"`,
+		`href="data:image/svg+xml,%3Csvg%3E"`,
 		`href="/assets/gamepage-nav.css"`,
 		`class="gamepage-back-link"`,
 		`href="/"`,
@@ -53,12 +54,15 @@ func TestRewriteResponse(t *testing.T) {
 		}
 	}
 	for _, unexpected := range []string{
-		`href="/play/race/favicon.svg"`,
+		`href="/favicon.svg"`,
 		`href="/play/race/assets/gamepage-nav.css"`,
 	} {
 		if strings.Contains(bodyText, unexpected) {
 			t.Fatalf("did not expect %q in rewritten body:\n%s", unexpected, bodyText)
 		}
+	}
+	if got := response.Header.Get("Content-Security-Policy"); !strings.Contains(got, "style-src 'unsafe-inline' 'self'") {
+		t.Fatalf("expected navigation stylesheet to be allowed, got %q", got)
 	}
 	if got := response.Header.Get("Location"); got != "/play/race/room/ABC" {
 		t.Fatalf("unexpected location: %s", got)
@@ -68,6 +72,50 @@ func TestRewriteResponse(t *testing.T) {
 	}
 	if got := response.Header.Get("ETag"); got != "" {
 		t.Fatalf("etag should be removed, got %s", got)
+	}
+}
+
+func TestNativeGameFaviconsArePreserved(t *testing.T) {
+	tests := []struct {
+		name     string
+		prefix   string
+		iconHTML string
+		expected string
+	}{
+		{
+			name:     "Trump vs Shakespeare",
+			prefix:   "/play/trump",
+			iconHTML: `<link rel="icon" href="/static/icon.svg?v=1.0.2" type="image/svg+xml">`,
+			expected: `href="/play/trump/static/icon.svg?v=1.0.2"`,
+		},
+		{
+			name:     "Crazy Mini Golf",
+			prefix:   "/play/golf",
+			iconHTML: `<link rel="icon" type="image/svg+xml" href="./favicon.svg">`,
+			expected: `href="./favicon.svg"`,
+		},
+		{
+			name:     "Crazy Race",
+			prefix:   "/play/race",
+			iconHTML: `<link rel="icon" href="data:image/svg+xml,%3Csvg%3E">`,
+			expected: `href="data:image/svg+xml,%3Csvg%3E"`,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			input := `<!doctype html><html><head>` + test.iconHTML + `</head><body><main>Game</main></body></html>`
+			actual := injectGamePageChrome(rewriteRootPaths(input, test.prefix))
+			if !strings.Contains(actual, test.expected) {
+				t.Fatalf("expected native icon %q in:\n%s", test.expected, actual)
+			}
+			if strings.Contains(actual, `href="/favicon.svg"`) {
+				t.Fatalf("GamePage fallback must not replace the native icon:\n%s", actual)
+			}
+			if !strings.Contains(actual, `class="gamepage-back-link"`) {
+				t.Fatalf("expected launcher back link in:\n%s", actual)
+			}
+		})
 	}
 }
 
@@ -92,11 +140,44 @@ func TestNonHTMLResponseDoesNotInjectGamePageChrome(t *testing.T) {
 }
 
 func TestInjectGamePageChromeIsIdempotent(t *testing.T) {
-	input := `<!doctype html><html><head></head><body><main>Game</main></body></html>`
+	input := `<!doctype html><html><head><link rel="icon" href="./favicon.svg"></head><body><main>Game</main></body></html>`
 	once := injectGamePageChrome(input)
 	twice := injectGamePageChrome(once)
 	if once != twice {
 		t.Fatalf("expected idempotent injection:\nonce:  %s\ntwice: %s", once, twice)
+	}
+}
+
+func TestEnsureStyleSourceSelf(t *testing.T) {
+	tests := []struct {
+		name     string
+		input    string
+		expected string
+	}{
+		{
+			name:     "adds self to existing style directive",
+			input:    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'",
+			expected: "style-src 'unsafe-inline' 'self'",
+		},
+		{
+			name:     "keeps existing self",
+			input:    "default-src 'none'; style-src 'self' 'unsafe-inline'",
+			expected: "default-src 'none'; style-src 'self' 'unsafe-inline'",
+		},
+		{
+			name:     "adds style directive when missing",
+			input:    "default-src 'none'; img-src data:",
+			expected: "default-src 'none'; img-src data:; style-src 'self'",
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			actual := ensureStyleSourceSelf(test.input)
+			if !strings.Contains(actual, test.expected) {
+				t.Fatalf("expected %q in %q", test.expected, actual)
+			}
+		})
 	}
 }
 
