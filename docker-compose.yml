@@ -4,9 +4,11 @@ services:
   gamepage:
     build:
       context: .
+      dockerfile: Dockerfile
     image: game-page:latest
     restart: unless-stopped
     init: true
+    stop_grace_period: 15s
     ports:
       - "127.0.0.1:${GAMEPAGE_PORT:-8090}:8080"
     environment:
@@ -17,13 +19,15 @@ services:
       TRUMP_UPSTREAM: http://trump-vs-shakespeare:8000
       GOLF_UPSTREAM: http://crazy-mini-golf:8080
       RACE_UPSTREAM: http://crazy-race:8080
+    # Keep the launcher available during a partial game outage. /readyz and
+    # /api/status still report any unhealthy upstream service.
     depends_on:
       trump-vs-shakespeare:
-        condition: service_healthy
+        condition: service_started
       crazy-mini-golf:
-        condition: service_healthy
+        condition: service_started
       crazy-race:
-        condition: service_healthy
+        condition: service_started
     read_only: true
     cap_drop:
       - ALL
@@ -43,9 +47,11 @@ services:
   trump-vs-shakespeare:
     build:
       context: "${TRUMP_REPO_PATH:-../TrumpVsShakespeare}"
+      dockerfile: Dockerfile
     image: trump-vs-shakespeare:gamepage
     restart: unless-stopped
     init: true
+    stop_grace_period: 15s
     expose:
       - "8000"
     environment:
@@ -81,9 +87,11 @@ services:
   crazy-mini-golf:
     build:
       context: "${GOLF_REPO_PATH:-../CrazyMiniGolf}"
+      dockerfile: Dockerfile
     image: crazy-mini-golf:gamepage
     restart: unless-stopped
     init: true
+    stop_grace_period: 10s
     expose:
       - "8080"
     read_only: true
@@ -102,9 +110,11 @@ services:
   crazy-race:
     build:
       context: "${RACE_REPO_PATH:-../CrazyRaceGame}"
+      dockerfile: Dockerfile
     image: crazy-race:gamepage
     restart: unless-stopped
     init: true
+    stop_grace_period: 15s
     expose:
       - "8080"
     environment:
