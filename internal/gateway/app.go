@@ -32,6 +32,7 @@ func New(config Config, logger *slog.Logger) (*App, error) {
 		config.StatusCacheTTL,
 		config.COBOLCoreExecutable,
 		config.MaintenanceMode,
+		config.MinimumLaunchableGames,
 	)
 	mux := http.NewServeMux()
 
