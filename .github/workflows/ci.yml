@@ -1,0 +1,70 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          show-progress: false
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+
+      - name: Test and vet gateway
+        run: |
+          go test -race ./...
+          go vet ./...
+
+      - name: Compile COBOL and generate launcher assets
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y gnucobol
+          set +e
+          cobc -x -free -Wall -o /tmp/gamepage-builder src/gamepage.cob > /tmp/cobol-build.log 2>&1
+          cobol_status=$?
+          set -e
+          cat /tmp/cobol-build.log
+          if [ "$cobol_status" -ne 0 ]; then
+            exit "$cobol_status"
+          fi
+          mkdir -p /tmp/gamepage-site/assets
+          (cd /tmp/gamepage-site && /tmp/gamepage-builder)
+          test -s /tmp/gamepage-site/index.html
+          test -s /tmp/gamepage-site/assets/styles.css
+          test -s /tmp/gamepage-site/assets/status.js
+          grep -q "COBOL Game Mainframe" /tmp/gamepage-site/index.html
+          grep -q "/play/trump/" /tmp/gamepage-site/index.html
+          grep -q "/play/golf/" /tmp/gamepage-site/index.html
+          grep -q "/play/race/" /tmp/gamepage-site/index.html
+
+      - name: Upload COBOL diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cobol-diagnostics
+          path: /tmp/cobol-build.log
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Validate Compose model
+        run: docker compose config --quiet
+
+      - name: Build GamePage image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: false
+          tags: game-page:ci

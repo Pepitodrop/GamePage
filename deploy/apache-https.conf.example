@@ -1,0 +1,25 @@
+# Reference configuration for the HTTPS vhost Certbot creates.
+# Certbot normally manages the certificate directives automatically.
+<VirtualHost *:443>
+    ServerName game.luisbenedikt.de
+
+    SSLEngine on
+    SSLCertificateFile /etc/letsencrypt/live/game.luisbenedikt.de/fullchain.pem
+    SSLCertificateKeyFile /etc/letsencrypt/live/game.luisbenedikt.de/privkey.pem
+
+    ProxyPreserveHost On
+    ProxyRequests Off
+    RequestHeader set X-Forwarded-Proto "https"
+
+    RewriteEngine On
+    RewriteCond %{HTTP:Upgrade} =websocket [NC]
+    RewriteCond %{HTTP:Connection} upgrade [NC]
+    RewriteRule ^/(.*)$ ws://127.0.0.1:8090/$1 [P,L]
+
+    ProxyPass        / http://127.0.0.1:8090/ connectiontimeout=5 timeout=90 retry=0
+    ProxyPassReverse / http://127.0.0.1:8090/
+
+    Header always set Strict-Transport-Security "max-age=31536000; includeSubDomains"
+    ErrorLog ${APACHE_LOG_DIR}/game.luisbenedikt.de-ssl-error.log
+    CustomLog ${APACHE_LOG_DIR}/game.luisbenedikt.de-ssl-access.log combined
+</VirtualHost>

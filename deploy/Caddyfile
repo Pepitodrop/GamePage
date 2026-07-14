@@ -1,0 +1,6 @@
+# Alternative to Apache. Caddy obtains and renews TLS automatically after the
+# domain points at this server and ports 80/443 are reachable.
+game.luisbenedikt.de {
+    encode zstd gzip
+    reverse_proxy 127.0.0.1:8090
+}
