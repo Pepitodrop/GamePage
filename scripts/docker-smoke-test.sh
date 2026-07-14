@@ -41,6 +41,11 @@ retry 'healthy policy states are reported' body_contains "$BASE_URL/api/status" 
 retry 'all games are launchable' body_contains "$BASE_URL/api/status" '"launchable":true'
 retry 'all games are required by default' body_contains "$BASE_URL/api/status" '"required":true'
 
+for game_path in trump golf race; do
+  retry "$game_path page has a tab icon" body_contains "$BASE_URL/play/$game_path/" 'href="/favicon.svg"'
+  retry "$game_path page links back to the launcher" body_contains "$BASE_URL/play/$game_path/" 'class="gamepage-back-link"'
+done
+
 redirect_headers="$(curl --silent --show-error --head --max-time 10 "$BASE_URL/play/race")"
 printf '%s\n' "$redirect_headers" | grep --extended-regexp --quiet '^HTTP/.* 308 '
 printf '%s\n' "$redirect_headers" | grep --ignore-case --extended-regexp --quiet '^location: /play/race/'
@@ -48,9 +53,15 @@ printf 'PASS: canonical game-prefix redirect\n'
 
 for service_port in 'trump-vs-shakespeare 8000' 'crazy-mini-golf 8080' 'crazy-race 8080'; do
   read -r service port <<<"$service_port"
-  published="$(docker compose port "$service" "$port" 2>/dev/null || true)"
-  if [[ -n "$published" ]]; then
-    printf 'FAIL: %s unexpectedly publishes %s at %s\n' "$service" "$port" "$published" >&2
+  container_id="$(docker compose ps --quiet "$service")"
+  if [[ -z "$container_id" ]]; then
+    printf 'FAIL: %s container is not running\n' "$service" >&2
+    exit 1
+  fi
+  if ! docker inspect "$container_id" --format '{{json .NetworkSettings.Ports}}' \
+      | jq --exit-status --arg port "$port/tcp" '(.[$port] // null) == null' >/dev/null; then
+    printf 'FAIL: %s unexpectedly publishes %s\n' "$service" "$port" >&2
+    docker inspect "$container_id" --format '{{json .NetworkSettings.Ports}}' | jq >&2
     exit 1
   fi
   printf 'PASS: %s:%s is private\n' "$service" "$port"
