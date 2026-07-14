@@ -6,13 +6,14 @@ RUN apt-get update \
     && apt-get install -y --no-install-recommends gnucobol ca-certificates \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /src
+COPY src/game_registry.cpy ./game_registry.cpy
 COPY src/gamepage.cob ./gamepage.cob
 COPY src/gamepage_registry.cob ./gamepage_registry.cob
 COPY src/gamepage_core.cob ./gamepage_core.cob
 RUN mkdir -p /out
-RUN cobc -x -free -Wall -o /usr/local/bin/gamepage-builder gamepage.cob \
-    && cobc -x -free -Wall -o /usr/local/bin/gamepage-registry-builder gamepage_registry.cob \
-    && cobc -x -free -Wall -o /out/gamepage-core gamepage_core.cob
+RUN cobc -x -free -Wall -I . -o /usr/local/bin/gamepage-builder gamepage.cob \
+    && cobc -x -free -Wall -I . -o /usr/local/bin/gamepage-registry-builder gamepage_registry.cob \
+    && cobc -x -free -Wall -I . -o /out/gamepage-core gamepage_core.cob
 RUN mkdir -p /out/assets /out/runtime \
     && cd /out \
     && /usr/local/bin/gamepage-builder \
@@ -24,6 +25,9 @@ RUN mkdir -p /out/assets /out/runtime \
     && test -s /out/runtime/policy.tsv \
     && test -s /out/runtime/architecture.json \
     && grep -q "COBOL Game Mainframe" /out/index.html \
+    && grep -q "Trump vs. Shakespeare" /out/index.html \
+    && grep -q "TRUMP_ENABLED" /out/runtime/routes.tsv \
+    && grep -q "MINIMUM_LAUNCHABLE_GAMES" /out/runtime/policy.tsv \
     && grep -q 'decision-engine-unavailable' /out/assets/status.js
 
 FROM golang:1.23-bookworm AS go-builder
