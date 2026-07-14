@@ -1,0 +1,158 @@
+name: Full-stack Docker
+
+on:
+  pull_request:
+    paths:
+      - Dockerfile
+      - docker-compose.yml
+      - .dockerignore
+      - .env.example
+      - scripts/docker-smoke-test.sh
+      - .github/workflows/full-stack-docker.yml
+  push:
+    branches: [main]
+    paths:
+      - Dockerfile
+      - docker-compose.yml
+      - .dockerignore
+      - .env.example
+      - scripts/docker-smoke-test.sh
+      - .github/workflows/full-stack-docker.yml
+  schedule:
+    - cron: "17 4 * * 1"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: full-stack-docker-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  smoke-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    env:
+      COMPOSE_PROJECT_NAME: game-page-ci
+      PUBLIC_ORIGIN: http://127.0.0.1:8090
+      GAMEPAGE_PORT: "8090"
+      MAX_ATTEMPTS: "5"
+      SLEEP_SECONDS: "1"
+      DOCKER_BUILDKIT: "1"
+      COMPOSE_DOCKER_CLI_BUILD: "1"
+
+    steps:
+      - name: Check out GamePage
+        uses: actions/checkout@v4
+        with:
+          path: GamePage
+          show-progress: false
+
+      - name: Check out Trump vs. Shakespeare
+        uses: actions/checkout@v4
+        with:
+          repository: Pepitodrop/TrumpVsShakespeare
+          path: TrumpVsShakespeare
+          show-progress: false
+
+      - name: Check out Crazy Mini Golf
+        uses: actions/checkout@v4
+        with:
+          repository: Pepitodrop/CrazyMiniGolf
+          path: CrazyMiniGolf
+          show-progress: false
+
+      - name: Check out Crazy Race
+        uses: actions/checkout@v4
+        with:
+          repository: Pepitodrop/CrazyRaceGame
+          path: CrazyRaceGame
+          show-progress: false
+
+      - name: Validate Compose configuration
+        working-directory: GamePage
+        run: |
+          cp .env.example .env
+          docker compose config --quiet
+
+      - name: Build all four images
+        working-directory: GamePage
+        run: docker compose build --pull --quiet
+
+      - name: Start and wait for the complete stack
+        id: start-stack
+        continue-on-error: true
+        working-directory: GamePage
+        run: docker compose up -d --wait --wait-timeout 240 --remove-orphans
+
+      - name: Capture startup diagnostics
+        if: steps.start-stack.outcome == 'failure'
+        working-directory: GamePage
+        run: |
+          {
+            echo '=== docker compose ps --all ==='
+            docker compose ps --all || true
+            echo
+            echo '=== docker compose logs ==='
+            docker compose logs --no-color --tail=500 || true
+          } | tee /tmp/full-stack-diagnostics.log
+
+      - name: Upload startup diagnostics
+        if: steps.start-stack.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-stack-diagnostics
+          path: /tmp/full-stack-diagnostics.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail on unhealthy startup
+        if: steps.start-stack.outcome == 'failure'
+        run: exit 1
+
+      - name: Run routed Docker smoke tests
+        id: routed-smoke
+        continue-on-error: true
+        working-directory: GamePage
+        run: bash scripts/docker-smoke-test.sh 2>&1 | tee /tmp/docker-smoke-test.log
+
+      - name: Capture routed smoke diagnostics
+        if: steps.routed-smoke.outcome == 'failure'
+        working-directory: GamePage
+        run: |
+          {
+            echo '=== smoke test output ==='
+            cat /tmp/docker-smoke-test.log || true
+            echo
+            echo '=== docker compose ps --all ==='
+            docker compose ps --all || true
+            echo
+            echo '=== docker compose logs ==='
+            docker compose logs --no-color --tail=500 || true
+          } | tee /tmp/routed-smoke-diagnostics.log
+
+      - name: Upload routed smoke diagnostics
+        if: steps.routed-smoke.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: routed-smoke-diagnostics
+          path: /tmp/routed-smoke-diagnostics.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail on routed smoke-test error
+        if: steps.routed-smoke.outcome == 'failure'
+        run: exit 1
+
+      - name: Show container status and logs
+        if: failure()
+        working-directory: GamePage
+        run: |
+          docker compose ps --all
+          docker compose logs --no-color --tail=250
+
+      - name: Stop the stack
+        if: always()
+        working-directory: GamePage
+        run: docker compose down --volumes --remove-orphans

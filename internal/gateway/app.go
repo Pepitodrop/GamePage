@@ -66,7 +66,18 @@ func New(config Config, logger *slog.Logger) (*App, error) {
 	mux.HandleFunc("GET /favicon.svg", exactFile(config.SiteDirectory, "favicon.svg", "image/svg+xml", "public, max-age=86400"))
 	mux.HandleFunc("GET /robots.txt", exactFile(config.SiteDirectory, "robots.txt", "text/plain; charset=utf-8", "public, max-age=3600"))
 	mux.HandleFunc("GET /.well-known/security.txt", exactFile(config.SiteDirectory, "security.txt", "text/plain; charset=utf-8", "public, max-age=3600"))
-	mux.HandleFunc("GET /", func(writer http.ResponseWriter, request *http.Request) {
+
+	// The game routes intentionally accept multiple HTTP methods. Registering a
+	// method-specific catch-all such as "GET /" alongside those routes causes
+	// Go 1.22+ ServeMux to panic because neither pattern is strictly more
+	// specific. A method-agnostic catch-all avoids that conflict; this handler
+	// then enforces GET/HEAD for launcher and not-found responses itself.
+	mux.HandleFunc("/", func(writer http.ResponseWriter, request *http.Request) {
+		if request.Method != http.MethodGet && request.Method != http.MethodHead {
+			writer.Header().Set("Allow", "GET, HEAD")
+			http.Error(writer, "Method not allowed", http.StatusMethodNotAllowed)
+			return
+		}
 		if request.URL.Path != "/" {
 			serveNotFound(config.SiteDirectory, writer)
 			return
