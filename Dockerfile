@@ -29,6 +29,8 @@ RUN mkdir -p /out/assets /out/runtime \
     && grep -q "TRUMP_ENABLED" /out/runtime/routes.tsv \
     && grep -q "MINIMUM_LAUNCHABLE_GAMES" /out/runtime/policy.tsv \
     && grep -q 'decision-engine-unavailable' /out/assets/status.js
+COPY deploy/gamepage-nav.css /out/assets/gamepage-nav.css
+RUN test -s /out/assets/gamepage-nav.css
 
 FROM golang:1.23-bookworm AS go-builder
 WORKDIR /src
