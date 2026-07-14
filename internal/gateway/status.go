@@ -16,14 +16,15 @@ import (
 )
 
 type statusChecker struct {
-	client          *http.Client
-	routes          []RouteConfig
-	cacheTTL        time.Duration
-	coreExecutable  string
-	maintenanceMode string
-	mu              sync.Mutex
-	cached          statusResponse
-	expires         time.Time
+	client                   *http.Client
+	routes                   []RouteConfig
+	cacheTTL                 time.Duration
+	coreExecutable           string
+	maintenanceMode          string
+	minimumLaunchableGames   string
+	mu                       sync.Mutex
+	cached                   statusResponse
+	expires                  time.Time
 }
 
 type statusResponse struct {
@@ -32,34 +33,51 @@ type statusResponse struct {
 	Mode           string                `json:"mode"`
 	DecisionEngine string                `json:"decisionEngine"`
 	CheckedAt      string                `json:"checkedAt"`
+	Policy         statusPolicy          `json:"policy"`
 	Summary        statusSummary         `json:"summary"`
 	Games          map[string]gameStatus `json:"games"`
 }
 
+type statusPolicy struct {
+	MinimumLaunchableGames int `json:"minimumLaunchableGames"`
+	RequiredFailures       int `json:"requiredFailures"`
+}
+
 type statusSummary struct {
-	Total int `json:"total"`
-	Up    int `json:"up"`
-	Down  int `json:"down"`
+	Total      int `json:"total"`
+	Up         int `json:"up"`
+	Down       int `json:"down"`
+	Enabled    int `json:"enabled"`
+	Required   int `json:"required"`
+	Launchable int `json:"launchable"`
+	Healthy    int `json:"healthy"`
+	Slow       int `json:"slow"`
+	Disabled   int `json:"disabled"`
 }
 
 type gameStatus struct {
-	Name       string `json:"name"`
-	Path       string `json:"path"`
-	Status     string `json:"status"`
-	HTTPStatus int    `json:"httpStatus"`
-	LatencyMS  int64  `json:"latencyMs"`
-	Error      string `json:"error,omitempty"`
-	Launchable bool   `json:"launchable"`
-	Reason     string `json:"reason"`
+	Name         string `json:"name"`
+	Path         string `json:"path"`
+	Status       string `json:"status"`
+	PolicyState  string `json:"policyState"`
+	HTTPStatus   int    `json:"httpStatus"`
+	LatencyMS    int64  `json:"latencyMs"`
+	Error        string `json:"error,omitempty"`
+	Enabled      bool   `json:"enabled"`
+	Required     bool   `json:"required"`
+	MaxLatencyMS int64  `json:"maxLatencyMs"`
+	Launchable   bool   `json:"launchable"`
+	Reason       string `json:"reason"`
 }
 
-func newStatusChecker(routes []RouteConfig, timeout, cacheTTL time.Duration, coreExecutable, maintenanceMode string) *statusChecker {
+func newStatusChecker(routes []RouteConfig, timeout, cacheTTL time.Duration, coreExecutable, maintenanceMode, minimumLaunchableGames string) *statusChecker {
 	return &statusChecker{
-		client:          &http.Client{Timeout: timeout},
-		routes:          routes,
-		cacheTTL:        cacheTTL,
-		coreExecutable:  coreExecutable,
-		maintenanceMode: maintenanceMode,
+		client:                 &http.Client{Timeout: timeout},
+		routes:                 routes,
+		cacheTTL:               cacheTTL,
+		coreExecutable:         coreExecutable,
+		maintenanceMode:        maintenanceMode,
+		minimumLaunchableGames: minimumLaunchableGames,
 	}
 }
 
@@ -108,7 +126,7 @@ func (checker *statusChecker) checkRoute(ctx context.Context, route RouteConfig)
 		status.Error = "invalid-request"
 		return status
 	}
-	request.Header.Set("User-Agent", "GamePage-Health/2.0")
+	request.Header.Set("User-Agent", "GamePage-Health/3.0")
 	started := time.Now()
 	response, err := checker.client.Do(request)
 	status.LatencyMS = time.Since(started).Milliseconds()
@@ -140,13 +158,23 @@ func (checker *statusChecker) evaluateWithCOBOL(ctx context.Context, checkedAt s
 	outputPath := filepath.Join(workDirectory, "status.json")
 	var input bytes.Buffer
 	maintenance := safeEngineField(checker.maintenanceMode)
-	fmt.Fprintf(&input, "META|%s|%s\n", checkedAt, maintenance)
+	minimum := safeEngineField(checker.minimumLaunchableGames)
+	fmt.Fprintf(&input, "META|%s|%s|%s\n", checkedAt, maintenance, minimum)
 	for _, route := range checker.routes {
 		probe, exists := probes[route.Key]
 		if !exists {
 			return statusResponse{}, fmt.Errorf("missing health probe for %s", route.Key)
 		}
-		fields := []string{route.Key, probe.Name, probe.Path, probe.Status, fmt.Sprint(probe.HTTPStatus), fmt.Sprint(probe.LatencyMS), probe.Error}
+		fields := []string{
+			route.Key,
+			probe.Status,
+			fmt.Sprint(probe.HTTPStatus),
+			fmt.Sprint(probe.LatencyMS),
+			probe.Error,
+			route.EnabledOverride,
+			route.RequiredOverride,
+			route.MaxLatencyOverride,
+		}
 		for index := range fields {
 			fields[index] = safeEngineField(fields[index])
 		}
@@ -186,10 +214,29 @@ func validateCOBOLResult(result statusResponse, checkedAt string, routes []Route
 	if len(result.Games) != len(routes) || result.Summary.Total != len(routes) {
 		return fmt.Errorf("COBOL returned incomplete game data")
 	}
+	if result.Policy.MinimumLaunchableGames < 1 || result.Policy.MinimumLaunchableGames > len(routes) {
+		return fmt.Errorf("COBOL returned invalid minimum launchable policy")
+	}
+	if result.Policy.RequiredFailures < 0 || result.Policy.RequiredFailures > len(routes) {
+		return fmt.Errorf("COBOL returned invalid required-failure count")
+	}
+	if result.Summary.Up+result.Summary.Down != result.Summary.Total ||
+		result.Summary.Launchable > result.Summary.Enabled ||
+		result.Summary.Healthy+result.Summary.Slow > result.Summary.Launchable {
+		return fmt.Errorf("COBOL returned inconsistent summary counts")
+	}
 	for _, route := range routes {
 		status, exists := result.Games[route.Key]
 		if !exists || status.Name != route.Name || status.Path != route.Prefix+"/" {
 			return fmt.Errorf("COBOL returned invalid route data for %q", route.Key)
+		}
+		switch status.PolicyState {
+		case "healthy", "slow", "down", "disabled", "maintenance", "invalid":
+		default:
+			return fmt.Errorf("COBOL returned invalid policy state %q for %q", status.PolicyState, route.Key)
+		}
+		if status.MaxLatencyMS < 0 || status.LatencyMS < 0 {
+			return fmt.Errorf("COBOL returned invalid latency data for %q", route.Key)
 		}
 	}
 	return nil
@@ -213,6 +260,7 @@ func decisionEngineFailure(checkedAt string, probes map[string]gameStatus) statu
 		if probe.Status == "up" {
 			up++
 		}
+		probe.PolicyState = "down"
 		probe.Launchable = false
 		probe.Reason = "decision-engine-unavailable"
 		games[key] = probe
@@ -223,8 +271,11 @@ func decisionEngineFailure(checkedAt string, probes map[string]gameStatus) statu
 		Mode:           "fail-safe",
 		DecisionEngine: "unavailable",
 		CheckedAt:      checkedAt,
-		Summary:        statusSummary{Total: len(games), Up: up, Down: len(games) - up},
-		Games:          games,
+		Policy:         statusPolicy{MinimumLaunchableGames: 1, RequiredFailures: len(games)},
+		Summary: statusSummary{
+			Total: len(games), Up: up, Down: len(games) - up,
+		},
+		Games: games,
 	}
 }
 
