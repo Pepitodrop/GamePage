@@ -76,11 +76,38 @@ jobs:
 
       - name: Build all four images
         working-directory: GamePage
-        run: docker compose build --pull
+        run: docker compose build --pull --quiet
 
       - name: Start and wait for the complete stack
+        id: start-stack
+        continue-on-error: true
         working-directory: GamePage
         run: docker compose up -d --wait --wait-timeout 240 --remove-orphans
+
+      - name: Capture startup diagnostics
+        if: steps.start-stack.outcome == 'failure'
+        working-directory: GamePage
+        run: |
+          {
+            echo '=== docker compose ps --all ==='
+            docker compose ps --all || true
+            echo
+            echo '=== docker compose logs ==='
+            docker compose logs --no-color --tail=500 || true
+          } | tee /tmp/full-stack-diagnostics.log
+
+      - name: Upload startup diagnostics
+        if: steps.start-stack.outcome == 'failure'
+        uses: actions/upload-artifact@v4
+        with:
+          name: full-stack-diagnostics
+          path: /tmp/full-stack-diagnostics.log
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Fail on unhealthy startup
+        if: steps.start-stack.outcome == 'failure'
+        run: exit 1
 
       - name: Run routed Docker smoke tests
         working-directory: GamePage
