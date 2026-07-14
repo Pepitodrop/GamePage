@@ -7,6 +7,10 @@ on:
       - docker-compose.yml
       - .dockerignore
       - .env.example
+      - go.mod
+      - cmd/**
+      - internal/**
+      - src/**
       - scripts/docker-smoke-test.sh
       - .github/workflows/full-stack-docker.yml
   push:
@@ -16,6 +20,10 @@ on:
       - docker-compose.yml
       - .dockerignore
       - .env.example
+      - go.mod
+      - cmd/**
+      - internal/**
+      - src/**
       - scripts/docker-smoke-test.sh
       - .github/workflows/full-stack-docker.yml
   schedule:
@@ -37,6 +45,7 @@ jobs:
       COMPOSE_PROJECT_NAME: game-page-ci
       PUBLIC_ORIGIN: http://127.0.0.1:8090
       GAMEPAGE_PORT: "8090"
+      MAINTENANCE_MODE: "false"
       MAX_ATTEMPTS: "5"
       SLEEP_SECONDS: "1"
       DOCKER_BUILDKIT: "1"
