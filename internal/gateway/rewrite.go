@@ -130,6 +130,7 @@ func ensureCSPSource(policy, directive, source string) string {
 			if strings.EqualFold(existing, source) {
 				return strings.Join(parts, ";")
 			}
+		}
 		parts[index] = strings.TrimSpace(part) + " " + source
 		return strings.Join(parts, ";")
 	}
