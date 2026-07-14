@@ -32,7 +32,7 @@ RUN mkdir -p /out/assets /out/runtime \
 COPY deploy/gamepage-nav.css /out/assets/gamepage-nav.css
 RUN test -s /out/assets/gamepage-nav.css
 
-FROM golang:1.23-bookworm AS go-builder
+FROM golang:1.26-bookworm AS go-builder
 WORKDIR /src
 COPY go.mod ./
 COPY cmd ./cmd
