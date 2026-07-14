@@ -9,6 +9,7 @@ WORKDIR /src
 COPY src/gamepage.cob ./gamepage.cob
 COPY src/gamepage_registry.cob ./gamepage_registry.cob
 COPY src/gamepage_core.cob ./gamepage_core.cob
+RUN mkdir -p /out
 RUN cobc -x -free -Wall -o /usr/local/bin/gamepage-builder gamepage.cob \
     && cobc -x -free -Wall -o /usr/local/bin/gamepage-registry-builder gamepage_registry.cob \
     && cobc -x -free -Wall -o /out/gamepage-core gamepage_core.cob
