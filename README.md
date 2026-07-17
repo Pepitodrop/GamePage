@@ -1,6 +1,6 @@
 # COBOL Game Mainframe
 
-Play this game online at **[game.luisbenedikt.de](https://game.luisbenedikt.de/)**.
+Play these games online at **[game.luisbenedikt.de](https://game.luisbenedikt.de/)**.
 
 A production-oriented launcher and single-domain gateway for:
 
