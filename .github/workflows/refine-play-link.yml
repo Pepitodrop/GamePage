@@ -1,0 +1,46 @@
+name: Refine online play link wording
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/refine-play-link.yml
+
+permissions:
+  contents: write
+
+jobs:
+  update-readme:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Refine wording and remove temporary workflow
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+
+          readme = Path("README.md")
+          text = readme.read_text(encoding="utf-8")
+          text = text.replace(
+              "Play this game online at **[game.luisbenedikt.de](https://game.luisbenedikt.de/)**.",
+              "Play these games online at **[game.luisbenedikt.de](https://game.luisbenedikt.de/)**.",
+              1,
+          )
+          readme.write_text(text, encoding="utf-8")
+          Path(".github/workflows/refine-play-link.yml").unlink()
+          PY
+
+      - name: Commit README update
+        shell: bash
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add README.md .github/workflows/refine-play-link.yml
+          if ! git diff --cached --quiet; then
+            git commit -m "Refine online play link wording"
+            git push
+          fi
