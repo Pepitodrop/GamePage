@@ -45,8 +45,8 @@ type registryRoute struct {
 }
 
 type runtimePolicy struct {
-	StatusCacheTTL        time.Duration
-	MaxGames              int
+	StatusCacheTTL         time.Duration
+	MaxGames               int
 	MinimumLaunchableGames int
 }
 
@@ -59,13 +59,13 @@ func LoadConfig() (Config, error) {
 		return Config{}, fmt.Errorf("COBOL runtime policy: %w", err)
 	}
 
-	cacheTTL, err := time.ParseDuration(envOrDefault("STATUS_CACHE_TTL", policy.StatusCacheTTL.String()))
-	if err != nil || cacheTTL <= 0 {
-		return Config{}, fmt.Errorf("STATUS_CACHE_TTL must be a positive duration")
+	cacheTTL, err := positiveDurationEnv("STATUS_CACHE_TTL", policy.StatusCacheTTL.String())
+	if err != nil {
+		return Config{}, err
 	}
-	timeout, err := time.ParseDuration(envOrDefault("HEALTH_TIMEOUT", "3s"))
-	if err != nil || timeout <= 0 {
-		return Config{}, fmt.Errorf("HEALTH_TIMEOUT must be a positive duration")
+	timeout, err := positiveDurationEnv("HEALTH_TIMEOUT", "3s")
+	if err != nil {
+		return Config{}, err
 	}
 
 	origin := strings.TrimRight(envOrDefault("PUBLIC_ORIGIN", "https://game.luisbenedikt.de"), "/")
@@ -112,25 +112,23 @@ func LoadConfig() (Config, error) {
 	}, nil
 }
 
+func positiveDurationEnv(name, fallback string) (time.Duration, error) {
+	value, err := time.ParseDuration(envOrDefault(name, fallback))
+	if err != nil || value <= 0 {
+		return 0, fmt.Errorf("%s must be a positive duration", name)
+	}
+	return value, nil
+}
+
 func loadRuntimePolicy(path string) (runtimePolicy, error) {
-	file, err := os.Open(path)
+	records, err := readPipeRecords(path, 2)
 	if err != nil {
 		return runtimePolicy{}, err
 	}
-	defer file.Close()
 
-	values := map[string]string{}
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.Split(line, "|")
-		if len(parts) != 2 {
-			return runtimePolicy{}, fmt.Errorf("invalid policy record %q", line)
-		}
-		key, value := strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1])
+	values := make(map[string]string, len(records))
+	for _, record := range records {
+		key, value := record[0], record[1]
 		if key == "" || value == "" {
 			return runtimePolicy{}, fmt.Errorf("empty policy key or value")
 		}
@@ -138,9 +136,6 @@ func loadRuntimePolicy(path string) (runtimePolicy, error) {
 			return runtimePolicy{}, fmt.Errorf("duplicate policy key %q", key)
 		}
 		values[key] = value
-	}
-	if err := scanner.Err(); err != nil {
-		return runtimePolicy{}, err
 	}
 
 	cacheTTL, err := time.ParseDuration(values["STATUS_CACHE_TTL"])
@@ -162,42 +157,34 @@ func loadRuntimePolicy(path string) (runtimePolicy, error) {
 		return runtimePolicy{}, fmt.Errorf("SLOW_GAMES_REMAIN_LAUNCHABLE must be true")
 	}
 	return runtimePolicy{
-		StatusCacheTTL:        cacheTTL,
-		MaxGames:              maxGames,
+		StatusCacheTTL:         cacheTTL,
+		MaxGames:               maxGames,
 		MinimumLaunchableGames: minimum,
 	}, nil
 }
 
 func loadRouteRegistry(path string, maxGames int) ([]registryRoute, error) {
-	file, err := os.Open(path)
+	records, err := readPipeRecords(path, 12)
 	if err != nil {
 		return nil, err
 	}
-	defer file.Close()
 
-	var routes []registryRoute
+	routes := make([]registryRoute, 0, len(records))
 	seenKeys := map[string]struct{}{}
 	seenPrefixes := map[string]struct{}{}
-	scanner := bufio.NewScanner(file)
-	for scanner.Scan() {
-		line := strings.TrimSpace(scanner.Text())
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		parts := strings.Split(line, "|")
-		if len(parts) != 12 {
-			return nil, fmt.Errorf("invalid route record %q", line)
-		}
-		for index := range parts {
-			parts[index] = strings.TrimSpace(parts[index])
-			if !isSafeCOBOLField(parts[index]) {
+
+	for _, parts := range records {
+		for _, field := range parts {
+			if !isSafeCOBOLField(field) {
 				return nil, fmt.Errorf("route field contains a forbidden JSON or record character")
 			}
 		}
+
 		defaultMaxLatency, err := strconv.Atoi(parts[11])
 		if err != nil || defaultMaxLatency < 1 || defaultMaxLatency > 999999 {
 			return nil, fmt.Errorf("invalid default latency for route %q", parts[0])
 		}
+
 		route := registryRoute{
 			key: parts[0], name: parts[1], prefix: parts[2], upstreamEnv: parts[3],
 			fallback: parts[4], healthPath: parts[5], enabledEnv: parts[6],
@@ -230,6 +217,7 @@ func loadRouteRegistry(path string, maxGames int) ([]registryRoute, error) {
 		if _, exists := seenPrefixes[route.prefix]; exists {
 			return nil, fmt.Errorf("duplicate route prefix %q", route.prefix)
 		}
+
 		seenKeys[route.key] = struct{}{}
 		seenPrefixes[route.prefix] = struct{}{}
 		routes = append(routes, route)
@@ -237,13 +225,41 @@ func loadRouteRegistry(path string, maxGames int) ([]registryRoute, error) {
 			return nil, fmt.Errorf("registry exceeds COBOL MAX_GAMES policy")
 		}
 	}
-	if err := scanner.Err(); err != nil {
-		return nil, err
-	}
+
 	if len(routes) == 0 {
 		return nil, fmt.Errorf("registry contains no games")
 	}
 	return routes, nil
+}
+
+func readPipeRecords(path string, expectedFields int) ([][]string, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	var records [][]string
+	scanner := bufio.NewScanner(file)
+	for scanner.Scan() {
+		line := strings.TrimSpace(scanner.Text())
+		if line == "" || strings.HasPrefix(line, "#") {
+			continue
+		}
+
+		parts := strings.Split(line, "|")
+		if len(parts) != expectedFields {
+			return nil, fmt.Errorf("invalid record %q", line)
+		}
+		for index := range parts {
+			parts[index] = strings.TrimSpace(parts[index])
+		}
+		records = append(records, parts)
+	}
+	if err := scanner.Err(); err != nil {
+		return nil, err
+	}
+	return records, nil
 }
 
 func isSafeCOBOLField(value string) bool {
