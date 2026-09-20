@@ -50,6 +50,11 @@ jobs:
       SLEEP_SECONDS: "1"
       DOCKER_BUILDKIT: "1"
       COMPOSE_DOCKER_CLI_BUILD: "1"
+      # Not a real credential: Movie Selector never contacts Wencke during this smoke
+      # suite (its own Wencke integration is covered by MovieSelector's own backend
+      # tests, run inside its Dockerfile build, against a local mock). This value only
+      # satisfies docker-compose's required-variable check so the container can start.
+      WENCKE_SITE_PASSWORD: "ci-placeholder-not-a-real-credential"
 
     steps:
       - name: Check out GamePage
@@ -77,6 +82,13 @@ jobs:
         with:
           repository: Pepitodrop/CrazyRaceGame
           path: CrazyRaceGame
+          show-progress: false
+
+      - name: Check out Movie Selector
+        uses: actions/checkout@v4
+        with:
+          repository: Pepitodrop/MovieSelector
+          path: MovieSelector
           show-progress: false
 
       - name: Validate Compose configuration

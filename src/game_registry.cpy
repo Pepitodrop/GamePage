@@ -1,4 +1,4 @@
-       01 REGISTRY-GAME-COUNT PIC 9(2) VALUE 3.
+       01 REGISTRY-GAME-COUNT PIC 9(2) VALUE 4.
        01 REGISTRY-DEFAULT-MINIMUM-LAUNCHABLE PIC 9(2) VALUE 1.
        01 REGISTRY-DEFAULT-STATUS-CACHE-TTL PIC X(16) VALUE "5s".
 
@@ -66,9 +66,30 @@
              10 FILLER PIC X(96) VALUE "Adaptive Piet boosts".
              10 FILLER PIC X(48) VALUE "Start race".
              10 FILLER PIC X(160) VALUE "https://github.com/Pepitodrop/CrazyRaceGame".
+          05 FILLER.
+             10 FILLER PIC X(16) VALUE "movies".
+             10 FILLER PIC X(64) VALUE "Movie Selector".
+             10 FILLER PIC X(16) VALUE "movies".
+             10 FILLER PIC X(64) VALUE "/play/movie-selector".
+             10 FILLER PIC X(32) VALUE "MOVIES_UPSTREAM".
+             10 FILLER PIC X(128) VALUE "http://movie-selector:8080".
+             10 FILLER PIC X(32) VALUE "/api/health".
+             10 FILLER PIC X(32) VALUE "MOVIES_ENABLED".
+             10 FILLER PIC X(32) VALUE "MOVIES_REQUIRED".
+             10 FILLER PIC X(32) VALUE "MOVIES_MAX_LATENCY_MS".
+             10 FILLER PIC X VALUE "Y".
+             10 FILLER PIC X VALUE "Y".
+             10 FILLER PIC 9(6) VALUE 002500.
+             10 FILLER PIC X(96) VALUE "PIET / KOTLIN".
+             10 FILLER PIC X(256) VALUE "A Tinder-style movie-night picker whose shuffle, accept, reject, and undo logic all run through a real Piet interpreter, backed by the shared Wencke movie watchlist.".
+             10 FILLER PIC X(96) VALUE "Swipe, drag, or keyboard play".
+             10 FILLER PIC X(96) VALUE "Piet-driven seeded shuffle".
+             10 FILLER PIC X(96) VALUE "Live Wencke watchlist sync".
+             10 FILLER PIC X(48) VALUE "Pick a movie".
+             10 FILLER PIC X(160) VALUE "https://github.com/Pepitodrop/MovieSelector".
 
        01 GAME-REGISTRY REDEFINES GAME-REGISTRY-STORAGE.
-          05 REGISTRY-GAME OCCURS 3 TIMES.
+          05 REGISTRY-GAME OCCURS 4 TIMES.
              10 REG-GAME-KEY PIC X(16).
              10 REG-GAME-NAME PIC X(64).
              10 REG-GAME-CSS-CLASS PIC X(16).
