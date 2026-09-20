@@ -406,7 +406,7 @@ Core CI verifies:
 
 Full-stack Docker CI checks out all five repositories, builds and starts all services, runs routed smoke tests, verifies `decisionEngine: gnucobol`, policy states, launchability, redirects, private ports, and clean shutdown.
 
-Movie Selector's Dockerfile lives only on the `feat/piet-core` branch ([MovieSelector#1](https://github.com/Pepitodrop/MovieSelector/pull/1)), not yet on `main`. Until that PR merges, `.github/workflows/full-stack-docker.yml` pins the Movie Selector checkout to that PR's head commit (`781833f43fe2f3325f31609dde9bcdb756daea65`); update or drop that pin when #1 merges.
+Movie Selector's Dockerfile lives only on the `feat/piet-core` branch ([MovieSelector#1](https://github.com/Pepitodrop/MovieSelector/pull/1)), not yet on `main`. Until that PR merges, `.github/workflows/full-stack-docker.yml` pins the Movie Selector checkout to that PR's head commit (`fce418835d8b32362feafa92a5fd2ba86ce8e6e3`); update or drop that pin when #1 merges.
 
 ## Security model
 
@@ -419,7 +419,8 @@ Movie Selector's Dockerfile lives only on the `feat/piet-core` branch ([MovieSel
 - missing or malformed COBOL output fails closed;
 - temporary files use mode `0600`, bounded tmpfs storage, and immediate cleanup;
 - containers use read-only filesystems, resource limits, log rotation, capability drops where supported, and `no-new-privileges`;
-- TLS terminates at Apache or Caddy.
+- TLS terminates at Apache or Caddy;
+- Movie Selector's Wencke integration is read-only: after login it only ever sends `GET /api/v1/movie-watchlist`, never a write against Wencke's data (see [MovieSelector's README](https://github.com/Pepitodrop/MovieSelector#wencke-integration-is-read-only)); all Movie Selector session state lives in that service's own in-memory store, never in Wencke.
 
 ## Public deployment
 
