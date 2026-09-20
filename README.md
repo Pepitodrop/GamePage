@@ -406,6 +406,8 @@ Core CI verifies:
 
 Full-stack Docker CI checks out all five repositories, builds and starts all services, runs routed smoke tests, verifies `decisionEngine: gnucobol`, policy states, launchability, redirects, private ports, and clean shutdown.
 
+Movie Selector's Dockerfile lives only on the `feat/piet-core` branch ([MovieSelector#1](https://github.com/Pepitodrop/MovieSelector/pull/1)), not yet on `main`. Until that PR merges, `.github/workflows/full-stack-docker.yml` pins the Movie Selector checkout to that PR's head commit (`781833f43fe2f3325f31609dde9bcdb756daea65`); update or drop that pin when #1 merges.
+
 ## Security model
 
 - only the gateway is published, and only on `127.0.0.1`;

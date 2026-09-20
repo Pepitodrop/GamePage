@@ -188,6 +188,10 @@ jobs:
           retention-days: 7
 
       - name: Validate Compose model
+        env:
+          # Not a real credential: this job only validates interpolation, it never
+          # builds or starts the stack. See full-stack-docker.yml for the same value.
+          WENCKE_SITE_PASSWORD: "ci-placeholder-not-a-real-credential"
         run: docker compose config --quiet
 
       - name: Build GamePage image
