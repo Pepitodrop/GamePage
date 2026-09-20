@@ -88,10 +88,6 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Pepitodrop/MovieSelector
-          # MovieSelector's Dockerfile only exists on the feat/piet-core branch
-          # (Pepitodrop/MovieSelector#1), not yet merged to main. Pin to that PR's
-          # head so this workflow can build it; drop this ref once #1 merges.
-          ref: fce418835d8b32362feafa92a5fd2ba86ce8e6e3
           path: MovieSelector
           show-progress: false
 
