@@ -10,6 +10,21 @@ A production-oriented launcher and single-domain gateway for:
 
 The intended public URL is **`https://game.luisbenedikt.de`**.
 
+## Planned game: Movie Selector
+
+A fourth game is planned for this launcher: **Movie Selector**. It will be a swipe-based movie-night picker that consumes the existing Wencke movie watchlist as its source of truth instead of maintaining a second movie catalogue.
+
+Planned behavior:
+
+- only unwatched watchlist titles that are available through Netflix, Disney+, or Prime Video should enter the game pool;
+- swipe/reject left skips a title for the current session only;
+- swipe/accept right immediately selects the movie and ends the session with a `MOVIE TIME` result;
+- the web game should be integrated into this existing launcher under the canonical `game.luisbenedikt.de` host, alongside the current games rather than as a duplicate games installation;
+- a native Android companion app should use the same underlying game logic and movie data;
+- the implementation target is **Piet + Kotlin**, with Piet performing meaningful core selection/session logic and Kotlin providing the interpreter, UI, API integration, and Android/Web platform code.
+
+This section is a roadmap/integration contract only; Movie Selector is not yet part of the canonical COBOL registry or production route map. Once implemented, its metadata, route, upstream, health policy, Compose wiring, CI/smoke coverage, and server layout must be added consistently with the existing registry-driven architecture.
+
 ## COBOL is the application authority
 
 GamePage uses **COBOL as its application, registry, and policy layer**. Go is intentionally restricted to networking and operating-system responsibilities: HTTP transport, reverse proxying, WebSocket forwarding, concurrent probes, bounded response rewriting, logging, and graceful shutdown.
