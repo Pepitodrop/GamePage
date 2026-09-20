@@ -97,8 +97,10 @@ printf 'PASS: movie-selector has egress; found on networks: %s\n' "$movies_netwo
 
 for isolated_service in trump-vs-shakespeare crazy-mini-golf crazy-race; do
   container_id="$(docker compose ps --quiet "$isolated_service")"
+  # Compose prefixes network names with the project name (e.g. game-page_games), so match the
+  # logical `games` network by suffix and require it to be the only one.
   networks="$(docker inspect "$container_id" --format '{{json .NetworkSettings.Networks}}' | jq -r 'keys | sort | join(",")')"
-  if [[ "$networks" != "games" ]]; then
+  if [[ ! "$networks" =~ ^([A-Za-z0-9._-]+_)?games$ ]]; then
     printf 'FAIL: %s should be on only the internal games network, found: %s\n' "$isolated_service" "$networks" >&2
     exit 1
   fi
