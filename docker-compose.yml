@@ -30,9 +30,13 @@ services:
       RACE_ENABLED: "${RACE_ENABLED:-true}"
       RACE_REQUIRED: "${RACE_REQUIRED:-true}"
       RACE_MAX_LATENCY_MS: "${RACE_MAX_LATENCY_MS:-2500}"
+      MOVIES_ENABLED: "${MOVIES_ENABLED:-true}"
+      MOVIES_REQUIRED: "${MOVIES_REQUIRED:-true}"
+      MOVIES_MAX_LATENCY_MS: "${MOVIES_MAX_LATENCY_MS:-2500}"
       TRUMP_UPSTREAM: http://trump-vs-shakespeare:8000
       GOLF_UPSTREAM: http://crazy-mini-golf:8080
       RACE_UPSTREAM: http://crazy-race:8080
+      MOVIES_UPSTREAM: http://movie-selector:8080
     # Keep the launcher available during partial outages or maintenance mode.
     # COBOL owns readiness, optional degradation, and route launchability.
     depends_on:
@@ -41,6 +45,8 @@ services:
       crazy-mini-golf:
         condition: service_started
       crazy-race:
+        condition: service_started
+      movie-selector:
         condition: service_started
     read_only: true
     tmpfs:
@@ -154,7 +160,46 @@ services:
       - games
     logging: *default-logging
 
+  # Movie Selector is the only game that needs to call out to a service outside this
+  # stack (Wencke, for the movie watchlist), so it alone gets a second, non-internal
+  # network for that egress. The other three games stay exactly as isolated as before:
+  # `games` has no route to the internet, and nothing was added to their definitions.
+  movie-selector:
+    build:
+      context: "${MOVIES_REPO_PATH:-../MovieSelector}"
+      dockerfile: Dockerfile
+    image: movie-selector:gamepage
+    restart: unless-stopped
+    init: true
+    stop_grace_period: 15s
+    expose:
+      - "8080"
+    environment:
+      PORT: 8080
+      PUBLIC_ORIGIN: "${PUBLIC_ORIGIN:-https://game.luisbenedikt.de}"
+      WENCKE_BASE_URL: "${WENCKE_BASE_URL:-https://wencke.love}"
+      # Required, no default: the real Wencke site-access password. Set it in .env,
+      # never in this file. The backend refuses to start without it.
+      WENCKE_SITE_PASSWORD: "${WENCKE_SITE_PASSWORD:?set WENCKE_SITE_PASSWORD in .env}"
+    read_only: true
+    tmpfs:
+      - /tmp:size=16m,mode=1777,noexec,nosuid,nodev
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    pids_limit: 256
+    mem_limit: 384m
+    cpus: 1.00
+    networks:
+      - games
+      - games-egress
+    logging: *default-logging
+
 networks:
   games:
     driver: bridge
     internal: true
+  games-egress:
+    driver: bridge
+    internal: false

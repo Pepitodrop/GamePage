@@ -7,23 +7,33 @@ A production-oriented launcher and single-domain gateway for:
 - [Trump vs. Shakespeare](https://github.com/Pepitodrop/TrumpVsShakespeare)
 - [Crazy Mini Golf](https://github.com/Pepitodrop/CrazyMiniGolf)
 - [Crazy Race](https://github.com/Pepitodrop/CrazyRaceGame)
+- [Movie Selector](https://github.com/Pepitodrop/MovieSelector)
 
 The intended public URL is **`https://game.luisbenedikt.de`**.
 
-## Planned game: Movie Selector
+## Movie Selector
 
-A fourth game is planned for this launcher: **Movie Selector**. It will be a swipe-based movie-night picker that consumes the existing Wencke movie watchlist as its source of truth instead of maintaining a second movie catalogue.
+A swipe-based movie-night picker at `/play/movie-selector/`, consuming the existing
+[Wencke](https://wencke.love) movie watchlist as its only source of truth (no second movie
+catalogue). Its shuffle, accept, reject, and undo session logic run through a real
+[Piet](https://esolangs.org/wiki/Piet) interpreter, not just Kotlin decoration -- see
+[`piet-core`](https://github.com/Pepitodrop/MovieSelector/tree/main/piet-core) in that repo.
 
-Planned behavior:
-
-- only unwatched watchlist titles that are available through Netflix, Disney+, or Prime Video should enter the game pool;
-- swipe/reject left skips a title for the current session only;
-- swipe/accept right immediately selects the movie and ends the session with a `MOVIE TIME` result;
-- the web game should be integrated into this existing launcher under the canonical `game.luisbenedikt.de` host, alongside the current games rather than as a duplicate games installation;
-- a native Android companion app should use the same underlying game logic and movie data;
-- the implementation target is **Piet + Kotlin**, with Piet performing meaningful core selection/session logic and Kotlin providing the interpreter, UI, API integration, and Android/Web platform code.
-
-This section is a roadmap/integration contract only; Movie Selector is not yet part of the canonical COBOL registry or production route map. Once implemented, its metadata, route, upstream, health policy, Compose wiring, CI/smoke coverage, and server layout must be added consistently with the existing registry-driven architecture.
+- only unwatched watchlist titles currently available through a Netflix, Disney+, or Prime
+  Video *subscription* (not rental/purchase) enter the game pool;
+- swipe/reject left skips a title for the current session only -- it is never deleted, marked
+  watched, or permanently disliked;
+- swipe/accept right immediately selects the movie and ends the session with a `MOVIE TIME`
+  result, no second confirmation;
+- a native Android companion app (`com.luisbenedikt.movieselector`) talks to the same backend
+  and session logic as the web client.
+- application source is **Piet + Kotlin** only (Piet performing the real
+  shuffle/accept/reject/undo arithmetic; Kotlin providing the interpreter, backend, and
+  Android/Web platform code); build/config/deployment files and generated browser artifacts
+  are exempt.
+- Movie Selector is the only game in this stack with outbound network access (to reach
+  Wencke); it holds its own server-side Wencke session so the browser and Android app never
+  see Wencke credentials -- see that repo's README for the full auth architecture.
 
 ## COBOL is the application authority
 
@@ -108,9 +118,13 @@ GOLF_MAX_LATENCY_MS=2500
 RACE_ENABLED=true
 RACE_REQUIRED=true
 RACE_MAX_LATENCY_MS=2500
+
+MOVIES_ENABLED=true
+MOVIES_REQUIRED=true
+MOVIES_MAX_LATENCY_MS=2500
 ```
 
-The defaults preserve the previous behavior: all three games are enabled and required.
+The defaults preserve the previous behavior: all four games are enabled and required.
 
 #### Enabled
 
@@ -297,7 +311,8 @@ GamePage/
 ├── GamePage/
 ├── TrumpVsShakespeare/
 ├── CrazyMiniGolf/
-└── CrazyRaceGame/
+├── CrazyRaceGame/
+└── MovieSelector/
 ```
 
 ```bash
@@ -308,6 +323,7 @@ git clone https://github.com/Pepitodrop/GamePage.git
 git clone https://github.com/Pepitodrop/TrumpVsShakespeare.git
 git clone https://github.com/Pepitodrop/CrazyMiniGolf.git
 git clone https://github.com/Pepitodrop/CrazyRaceGame.git
+git clone https://github.com/Pepitodrop/MovieSelector.git
 ```
 
 ## Configure and start
@@ -388,7 +404,7 @@ Core CI verifies:
 10. invalid policy input and fail-closed output;
 11. Compose validity and the production image build.
 
-Full-stack Docker CI checks out all four repositories, builds and starts all services, runs routed smoke tests, verifies `decisionEngine: gnucobol`, policy states, launchability, redirects, private ports, and clean shutdown.
+Full-stack Docker CI checks out all five repositories, builds and starts all services, runs routed smoke tests, verifies `decisionEngine: gnucobol`, policy states, launchability, redirects, private ports, and clean shutdown.
 
 ## Security model
 
@@ -425,13 +441,14 @@ Finally, create a Trump vs. Shakespeare online room and confirm that a second pu
 
 ## Updating and rollback
 
-Record all four repository SHAs before updating, then:
+Record all five repository SHAs before updating, then:
 
 ```bash
 git pull --ff-only
 git -C ../TrumpVsShakespeare pull --ff-only
 git -C ../CrazyMiniGolf pull --ff-only
 git -C ../CrazyRaceGame pull --ff-only
+git -C ../MovieSelector pull --ff-only
 docker compose build --pull
 docker compose up -d --wait --wait-timeout 240 --remove-orphans
 bash scripts/docker-smoke-test.sh
